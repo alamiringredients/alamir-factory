@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791813229446,
+      "tag": "0000_same_gressill",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791882815318,
+      "tag": "0001_loving_squirrel_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791884751956,
+      "tag": "0002_neat_wild_child",
+      "breakpoints": true
+    }
+  ]
+}
