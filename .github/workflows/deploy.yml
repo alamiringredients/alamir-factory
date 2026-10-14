@@ -1,0 +1,53 @@
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build standalone
+        run: |
+          cd standalone
+          zip -r ../alamir-factory.zip server.mjs workflow.mjs public/ package.json
+
+      - name: Deploy to Hostinger via SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          SSH_HOST: 145.79.20.44
+          SSH_PORT: 65002
+          SSH_USER: u897137902
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
+
+          scp -P $SSH_PORT -i ~/.ssh/deploy_key \
+            alamir-factory.zip \
+            $SSH_USER@$SSH_HOST:/home/$SSH_USER/domains/factory.alamiringredients.com/
+
+          ssh -p $SSH_PORT -i ~/.ssh/deploy_key $SSH_USER@$SSH_HOST << 'ENDSSH'
+            set -e
+            DEPLOY_DIR="/home/u897137902/domains/factory.alamiringredients.com"
+            VERSION=$(date +%Y%m%d%H%M%S)
+            VERSION_DIR="$DEPLOY_DIR/hbuilds/versions/$VERSION/nodejs"
+
+            mkdir -p "$VERSION_DIR"
+            cd "$DEPLOY_DIR"
+            unzip -o alamir-factory.zip -d "$VERSION_DIR"
+            rm -f alamir-factory.zip
+
+            ln -sfn "$DEPLOY_DIR/hbuilds/versions/$VERSION" \
+                    "$DEPLOY_DIR/hbuilds/current"
+
+            echo "Deployed version $VERSION"
+          ENDSSH
+
