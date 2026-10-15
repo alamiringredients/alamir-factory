@@ -1,3 +1,2365 @@
+var production_master_default = {
+	source: "Eng. Islam Master Data.xlsx",
+	revision: "2026-10-15",
+	materials: [
+		{
+			"code": "200000",
+			"name": "New Steel drum conical blue 220L 7mm",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200001",
+			"name": "New Clamping ring gal. 220L conical drum",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200002",
+			"name": "New Steel Lid galvanized 220L conical drum",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200003",
+			"name": "New Wooden Pallet 110*110Cm.",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200004",
+			"name": "Sticker",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200005",
+			"name": "Polyethylene Bag - (c.200KG-100 micron)",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200006",
+			"name": "Plastic Tie Ring Shaped Cable 37 Cm.",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200007",
+			"name": "Anti Tamper Security Plastic Seal",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200008",
+			"name": "Polypropylene Plastic Wrapping Strap",
+			"category": "packaging",
+			"unit": "M",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200009",
+			"name": "Metal Clip for Palett Wrapping Strap",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200010",
+			"name": "Used Drum-Conical Steel blue 220 Ltr.",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200011",
+			"name": "Used Clamping ring gal. 220L conical drum",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "200012",
+			"name": "Used Steel Lid blue 220 Ltr. conical drum",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging",
+			"phantom": false
+		},
+		{
+			"code": "300000",
+			"name": "Tomatoes Fruit (Summer)",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300001",
+			"name": "Fruit Strawberry ( Prepared )",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300002",
+			"name": "Fruit Strawberry (Kham)",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300003",
+			"name": "Fruit Guava",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300004",
+			"name": "Fruit Mango",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300005",
+			"name": "Hot Chilli Fruit",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300006",
+			"name": "Apricot Fruit",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "300010",
+			"name": "Ascorbic Acid E300 204004661",
+			"category": "raw",
+			"unit": "KG",
+			"warehouse": "RAW",
+			"sourceType": "Raw Material",
+			"phantom": false
+		},
+		{
+			"code": "400000",
+			"name": "New Drum-Conical Steel blue 220 Ltr.",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging Phantom",
+			"phantom": true
+		},
+		{
+			"code": "400001",
+			"name": "Used Drum-Conical Steel blue 220 Ltr.",
+			"category": "packaging",
+			"unit": "PC",
+			"warehouse": "PACK",
+			"sourceType": "Packaging Phantom",
+			"phantom": true
+		},
+		{
+			"code": "500000",
+			"name": "A Tomato Conc. B28-30CB",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500001",
+			"name": "A Tomato Conc. B28-30HB",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500002",
+			"name": "A Tomato Conc. B30-32CB",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500003",
+			"name": "A Tomato Conc. B30-32HB",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500004",
+			"name": "A Tomato Conc. B36-38CB",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500005",
+			"name": "Strawberry Pulp Seeds 1.5 W.O Clx",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500006",
+			"name": "Strawberry Pulp Seedless 0.6 W Clx",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500007",
+			"name": "Guava Pulp 0.6",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500008",
+			"name": "Mango Pulp 0.6",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500009",
+			"name": "Hot Chili Puree Concentrate 12-14",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500010",
+			"name": "Hot Chili Puree Concentrate 18-20",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500011",
+			"name": "Apricot Pulp",
+			"category": "semi",
+			"unit": "KG",
+			"warehouse": "SEMI",
+			"sourceType": "BULK",
+			"phantom": false
+		},
+		{
+			"code": "500000.01.0100",
+			"name": "A Tomato Conc. B28-30CB1.70-1.79DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500000.02.0100",
+			"name": "A Tomato Conc. B28-30CB1.80-1.89DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500000.03.0100",
+			"name": "A Tomato Conc. B28-30CB1.90.1.99DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500000.04.0100",
+			"name": "A Tomato Conc. B28-30CB2.00-2.09DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500000.05.0100",
+			"name": "A Tomato Conc. B28-30CB2.10-2.19DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500001.01.0100",
+			"name": "A Tomato Conc. B28-30HB1.70-1.79DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500001.02.0100",
+			"name": "A Tomato Conc. B28-30HB1.80-1.89DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500001.03.0100",
+			"name": "A Tomato Conc. B28-30HB1.90.1.99DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500001.04.0100",
+			"name": "A Tomato Conc. B28-30HB2.00-2.09DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500001.05.0100",
+			"name": "A Tomato Conc. B28-30HB2.10-2.19DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500002.01.0100",
+			"name": "A Tomato Conc. B30-32CB1.70-1.79DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500002.02.0100",
+			"name": "A Tomato Conc. B30-32CB1.80-1.89DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500002.03.0100",
+			"name": "A Tomato Conc. B30-32CB1.90.1.99DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500002.04.0100",
+			"name": "A Tomato Conc. B30-32CB2.00-2.09DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500002.05.0100",
+			"name": "A Tomato Conc. B30-32CB2.10-2.19DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500003.01.0100",
+			"name": "A Tomato Conc. B30-32HB1.70-1.79DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500003.02.0100",
+			"name": "A Tomato Conc. B30-32HB1.80-1.89DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500003.03.0100",
+			"name": "A Tomato Conc. B30-32HB1.90.1.99DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500003.04.0100",
+			"name": "A Tomato Conc. B30-32HB2.00-2.09DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500003.05.0100",
+			"name": "A Tomato Conc. B30-32HB2.10-2.19DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500004.01.0100",
+			"name": "A Tomato Conc. B36-38CB1.70-1.79DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500004.02.0100",
+			"name": "A Tomato Conc. B36-38CB1.80-1.89DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500004.03.0100",
+			"name": "A Tomato Conc. B36-38CB1.90.1.99DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500004.04.0100",
+			"name": "A Tomato Conc. B36-38CB2.00-2.09DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500004.05.0100",
+			"name": "A Tomato Conc. B36-38CB2.10-2.19DRM230Kg",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500005.00.0140",
+			"name": "Strawberry Pulp _Seeds_A190U",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500006.00.0140",
+			"name": "Strawberry Pulp _ Seedless_A190U",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500007.00.0130",
+			"name": "Guava Pulp 0.6- A200C",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500008.00.0120",
+			"name": "Mango Pulp 0.6-A215",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500009.00.0130",
+			"name": "Hot Chili Puree Conc. 12-14 – A200",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500010.00.0130",
+			"name": "Hot Chili Puree Conc. 18-20 – A200",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "500011.00.0130",
+			"name": "Apricot Pulp A200",
+			"category": "finished",
+			"unit": "KG",
+			"warehouse": "FG",
+			"sourceType": "Finished Product",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.990",
+			"name": "LP-Tomatoes Paste",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.991",
+			"name": "Lp-Strawberry Pulp",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.992",
+			"name": "Lp-Guava Pulp",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.993",
+			"name": "Lp-Mango Pulp",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.994",
+			"name": "Lp- Hot Chilli Puree",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "0.00099.996",
+			"name": "Lp-Apricot Pulp",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "Low Brix",
+			"phantom": false
+		},
+		{
+			"code": "999999.00.01",
+			"name": "Mango Stones",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "FERT",
+			"phantom": false
+		},
+		{
+			"code": "999999.00.02",
+			"name": "Apricot Stones",
+			"category": "byproduct",
+			"unit": "KG",
+			"warehouse": "OTHER",
+			"sourceType": "FERT",
+			"phantom": false
+		}
+	],
+	boms: [
+		{
+			"code": "500000.01.0100",
+			"name": "A Tomato Conc. B28-30CB1.70-1.79DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500000",
+				"name": "A Tomato Conc. B28-30CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500000",
+			"name": "A Tomato Conc. B28-30CB",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk for Direct Filling",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300000",
+					"name": "Tomatoes Fruit (Summer)",
+					"quantity": 6900,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "6900",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.990",
+					"name": "LP-Tomatoes Paste",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": " Tomato Peel",
+					"quantity": -345,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "-345",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500000.02.0100",
+			"name": "A Tomato Conc. B28-30CB1.80-1.89DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500000",
+				"name": "A Tomato Conc. B28-30CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500000.03.0100",
+			"name": "A Tomato Conc. B28-30CB1.90.1.99DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500000",
+				"name": "A Tomato Conc. B28-30CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500000.04.0100",
+			"name": "A Tomato Conc. B28-30CB2.00-2.09DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500000",
+				"name": "A Tomato Conc. B28-30CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500000.05.0100",
+			"name": "A Tomato Conc. B28-30CB2.10-2.19DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500000",
+				"name": "A Tomato Conc. B28-30CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500001.01.0100",
+			"name": "A Tomato Conc. B28-30HB1.70-1.79DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500001",
+				"name": "A Tomato Conc. B28-30HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500001",
+			"name": "A Tomato Conc. B28-30HB",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk for Direct Filling",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300000",
+					"name": "Tomatoes Fruit (Summer)",
+					"quantity": 6900,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "6900",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.990",
+					"name": "LP-Tomatoes Paste",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": " Tomato Peel",
+					"quantity": -345,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "-345",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500001.02.0100",
+			"name": "A Tomato Conc. B28-30HB1.80-1.89DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500001",
+				"name": "A Tomato Conc. B28-30HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500001.03.0100",
+			"name": "A Tomato Conc. B28-30HB1.90.1.99DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500001",
+				"name": "A Tomato Conc. B28-30HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500001.04.0100",
+			"name": "A Tomato Conc. B28-30HB2.00-2.09DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500001",
+				"name": "A Tomato Conc. B28-30HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500001.05.0100",
+			"name": "A Tomato Conc. B28-30HB2.10-2.19DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500001",
+				"name": "A Tomato Conc. B28-30HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500002.01.0100",
+			"name": "A Tomato Conc. B30-32CB1.70-1.79DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500002",
+				"name": "A Tomato Conc. B30-32CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500002",
+			"name": "A Tomato Conc. B30-32CB",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk for Direct Filling",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300000",
+					"name": "Tomatoes Fruit (Summer)",
+					"quantity": 6900,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "6900",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.990",
+					"name": "LP-Tomatoes Paste",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": " Tomato Peel",
+					"quantity": -345,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "-345",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500002.02.0100",
+			"name": "A Tomato Conc. B30-32CB1.80-1.89DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500002",
+				"name": "A Tomato Conc. B30-32CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500002.03.0100",
+			"name": "A Tomato Conc. B30-32CB1.90.1.99DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500002",
+				"name": "A Tomato Conc. B30-32CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500002.04.0100",
+			"name": "A Tomato Conc. B30-32CB2.00-2.09DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500002",
+				"name": "A Tomato Conc. B30-32CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500002.05.0100",
+			"name": "A Tomato Conc. B30-32CB2.10-2.19DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500002",
+				"name": "A Tomato Conc. B30-32CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500003.01.0100",
+			"name": "A Tomato Conc. B30-32HB1.70-1.79DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500003",
+				"name": "A Tomato Conc. B30-32HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500003",
+			"name": "A Tomato Conc. B30-32HB",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk for Direct Filling",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300000",
+					"name": "Tomatoes Fruit (Summer)",
+					"quantity": 6900,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "6900",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.990",
+					"name": "LP-Tomatoes Paste",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": " Tomato Peel",
+					"quantity": -345,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "-345",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500003.02.0100",
+			"name": "A Tomato Conc. B30-32HB1.80-1.89DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500003",
+				"name": "A Tomato Conc. B30-32HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500003.03.0100",
+			"name": "A Tomato Conc. B30-32HB1.90.1.99DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500003",
+				"name": "A Tomato Conc. B30-32HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500003.04.0100",
+			"name": "A Tomato Conc. B30-32HB2.00-2.09DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500003",
+				"name": "A Tomato Conc. B30-32HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500003.05.0100",
+			"name": "A Tomato Conc. B30-32HB2.10-2.19DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500003",
+				"name": "A Tomato Conc. B30-32HB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500004.01.0100",
+			"name": "A Tomato Conc. B36-38CB1.70-1.79DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500004",
+				"name": "A Tomato Conc. B36-38CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500004",
+			"name": "A Tomato Conc. B36-38CB",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk for Direct Filling",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300000",
+					"name": "Tomatoes Fruit (Summer)",
+					"quantity": 6900,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "6900",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.990",
+					"name": "LP-Tomatoes Paste",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": " Tomato Peel",
+					"quantity": -345,
+					"unit": "KG",
+					"originalUnit": "KG",
+					"originalQuantity": "-345",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500004.02.0100",
+			"name": "A Tomato Conc. B36-38CB1.80-1.89DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500004",
+				"name": "A Tomato Conc. B36-38CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500004.03.0100",
+			"name": "A Tomato Conc. B36-38CB1.90.1.99DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500004",
+				"name": "A Tomato Conc. B36-38CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500004.04.0100",
+			"name": "A Tomato Conc. B36-38CB2.00-2.09DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500004",
+				"name": "A Tomato Conc. B36-38CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500004.05.0100",
+			"name": "A Tomato Conc. B36-38CB2.10-2.19DRM230Kg",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500004",
+				"name": "A Tomato Conc. B36-38CB",
+				"quantity": 920,
+				"unit": "KG",
+				"originalUnit": "KG",
+				"originalQuantity": "920",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "PC",
+				"originalQuantity": "1",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500005.00.0140",
+			"name": "Strawberry Pulp _Seeds_A190U",
+			"base": 190,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500005",
+				"name": "Strawberry Pulp Seeds 1.5 W.O Clx",
+				"quantity": 190,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "190.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500005",
+			"name": "Strawberry Pulp Seeds 1.5 W.O Clx",
+			"base": 190,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300001",
+					"name": "Fruit Strawberry ( Prepared )",
+					"quantity": 205.84,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "205.840",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.991",
+					"name": "Lp-Strawberry Pulp",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": "Strawberry Peel",
+					"quantity": -6.175,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "6.175-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500006.00.0140",
+			"name": "Strawberry Pulp _ Seedless_A190U",
+			"base": 190,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500006",
+				"name": "Strawberry Pulp Seedless 0.6 W Clx",
+				"quantity": 190,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "190.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500006",
+			"name": "Strawberry Pulp Seedless 0.6 W Clx",
+			"base": 190,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300002",
+					"name": "Fruit Strawberry (Kham)",
+					"quantity": 209.41,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "209.410",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.991",
+					"name": "Lp-Strawberry Pulp",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": "Strawberry Peel",
+					"quantity": -6.282,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "6.282-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500007.00.0130",
+			"name": "Guava Pulp 0.6- A200C",
+			"base": 800,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500007",
+				"name": "Guava Pulp 0.6",
+				"quantity": 800,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "800.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500007",
+			"name": "Guava Pulp 0.6",
+			"base": 200,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300003",
+					"name": "Fruit Guava",
+					"quantity": 212.4,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "212.400",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "300010",
+					"name": "Ascorbic Acid E300 204004661",
+					"quantity": 20,
+					"unit": "G",
+					"originalUnit": "GM",
+					"originalQuantity": "20.000",
+					"coproduct": false
+				},
+				{
+					"item": "0030",
+					"code": "0.00099.992",
+					"name": "Lp-Guava Pulp",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0040",
+					"code": "999999.00.00",
+					"name": "Guava Peel",
+					"quantity": -21.24,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "21.240-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500008.00.0120",
+			"name": "Mango Pulp 0.6-A215",
+			"base": 860,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500008",
+				"name": "Mango Pulp 0.6",
+				"quantity": 860,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "860.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500008",
+			"name": "Mango Pulp 0.6",
+			"base": 200,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300004",
+					"name": "Fruit Mango",
+					"quantity": 285,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "285.000",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "300010",
+					"name": "Ascorbic Acid E300 204004661",
+					"quantity": 28,
+					"unit": "G",
+					"originalUnit": "GM",
+					"originalQuantity": "28.000",
+					"coproduct": false
+				},
+				{
+					"item": "0030",
+					"code": "0.00099.993",
+					"name": "Lp-Mango Pulp",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0070",
+					"code": "999999.00.00",
+					"name": "Mango Peel",
+					"quantity": -14.25,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "14.250-",
+					"coproduct": true
+				},
+				{
+					"item": "0080",
+					"code": "999999.00.01",
+					"name": "Mango Stones",
+					"quantity": -57,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "57.000-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500009.00.0130",
+			"name": "Hot Chili Puree Conc. 12-14 – A200",
+			"base": 800,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500009",
+				"name": "Hot Chili Puree Concentrate 12-14",
+				"quantity": 800,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "800.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500009",
+			"name": "Hot Chili Puree Concentrate 12-14",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300005",
+					"name": "Hot Chilli Fruit",
+					"quantity": 1850,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "1,850.000",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "0.00099.994",
+					"name": "Lp- Hot Chilli Puree",
+					"quantity": -200,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "200.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": "Hot Chilli Peel",
+					"quantity": -400,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "400.000-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500010.00.0130",
+			"name": "Hot Chili Puree Conc. 18-20 – A200",
+			"base": 800,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500010",
+				"name": "Hot Chili Puree Concentrate 18-20",
+				"quantity": 800,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "800.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500010",
+			"name": "Hot Chili Puree Concentrate 18-20",
+			"base": 1e3,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300005",
+					"name": "Hot Chilli Fruit",
+					"quantity": 2857,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "2,857.000",
+					"coproduct": false
+				},
+				{
+					"item": "0030",
+					"code": "999999.00.00",
+					"name": "Lp- Hot Chilli Puree",
+					"quantity": -200,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "200.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0020",
+					"code": "999999.00.00",
+					"name": "Hot Chilli Peel",
+					"quantity": -400,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "400.000-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "500011.00.0130",
+			"name": "Apricot Pulp A200",
+			"base": 860,
+			"unit": "KG",
+			"process": "Direct Filling",
+			"lines": [{
+				"item": "0010",
+				"code": "500011",
+				"name": "Apricot Pulp",
+				"quantity": 860,
+				"unit": "KG",
+				"originalUnit": "KGM",
+				"originalQuantity": "860.000",
+				"coproduct": false
+			}, {
+				"item": "0020",
+				"code": "400000",
+				"name": "New Drum-Conical Steel blue 220 Ltr.",
+				"quantity": 1,
+				"unit": "PC",
+				"originalUnit": "ST",
+				"originalQuantity": "1.000",
+				"coproduct": false
+			}]
+		},
+		{
+			"code": "500011",
+			"name": "Apricot Pulp",
+			"base": 200,
+			"unit": "KG",
+			"process": "Bulk Production",
+			"lines": [
+				{
+					"item": "0010",
+					"code": "300006",
+					"name": "Apricot Fruit",
+					"quantity": 285,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "285.000",
+					"coproduct": false
+				},
+				{
+					"item": "0020",
+					"code": "300010",
+					"name": "Ascorbic Acid E300 204004661",
+					"quantity": 28,
+					"unit": "G",
+					"originalUnit": "GM",
+					"originalQuantity": "28.000",
+					"coproduct": false
+				},
+				{
+					"item": "0030",
+					"code": "0.00099.996",
+					"name": "Lp-Apricot Pulp",
+					"quantity": -500,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "500.000-",
+					"coproduct": true
+				},
+				{
+					"item": "0070",
+					"code": "999999.00.00",
+					"name": "Apricot Peel",
+					"quantity": -14.25,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "14.250-",
+					"coproduct": true
+				},
+				{
+					"item": "0080",
+					"code": "999999.00.02",
+					"name": "Apricot Stones",
+					"quantity": -57,
+					"unit": "KG",
+					"originalUnit": "KGM",
+					"originalQuantity": "57.000-",
+					"coproduct": true
+				}
+			]
+		},
+		{
+			"code": "400000",
+			"name": "New Drum-Conical Steel blue 220 Ltr.",
+			"base": 1,
+			"unit": "PC",
+			"process": "Phantom Packagaing",
+			"lines": [
+				{
+					"item": "10",
+					"code": "200000",
+					"name": "New Steel drum conical blue 220L 7mm",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "20",
+					"code": "200001",
+					"name": "New Clamping ring gal. 220L conical drum",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "30",
+					"code": "200002",
+					"name": "New Steel Lid galvanized 220L conical drum",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "40",
+					"code": "200003",
+					"name": "New Wooden Pallet 110*110Cm.",
+					"quantity": .25,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "0.25",
+					"coproduct": false
+				},
+				{
+					"item": "50",
+					"code": "200004",
+					"name": "Sticker",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "60",
+					"code": "200005",
+					"name": "Polyethylene Bag - (c.200KG-100 micron)",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "70",
+					"code": "200006",
+					"name": "Plastic Tie Ring Shaped Cable 37 Cm.",
+					"quantity": 2,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "2",
+					"coproduct": false
+				},
+				{
+					"item": "80",
+					"code": "200007",
+					"name": "Anti Tamper Security Plastic Seal",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "90",
+					"code": "200008",
+					"name": "Polypropylene Plastic Wrapping Strap",
+					"quantity": 1.25,
+					"unit": "M",
+					"originalUnit": "M",
+					"originalQuantity": "1.25",
+					"coproduct": false
+				},
+				{
+					"item": "100",
+					"code": "200009",
+					"name": "Metal Clip for Palett Wrapping Strap",
+					"quantity": 2,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "2",
+					"coproduct": false
+				}
+			]
+		},
+		{
+			"code": "400001",
+			"name": "Used Drum-Conical Steel blue 220 Ltr.",
+			"base": 1,
+			"unit": "PC",
+			"process": "Phantom Packagaing",
+			"lines": [
+				{
+					"item": "10",
+					"code": "200010",
+					"name": "Used Drum-Conical Steel blue 220 Ltr.",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "20",
+					"code": "200011",
+					"name": "Used Clamping ring gal. 220L conical drum",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "30",
+					"code": "200012",
+					"name": "Used Steel Lid blue 220 Ltr. conical drum",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "40",
+					"code": "200003",
+					"name": "New Wooden Pallet 110*110Cm.",
+					"quantity": .25,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "0.25",
+					"coproduct": false
+				},
+				{
+					"item": "50",
+					"code": "200004",
+					"name": "Sticker",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "60",
+					"code": "200005",
+					"name": "Polyethylene Bag - (c.200KG-100 micron)",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "70",
+					"code": "200006",
+					"name": "Plastic Tie Ring Shaped Cable 37 Cm.",
+					"quantity": 2,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "2",
+					"coproduct": false
+				},
+				{
+					"item": "80",
+					"code": "200007",
+					"name": "Anti Tamper Security Plastic Seal",
+					"quantity": 1,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "1",
+					"coproduct": false
+				},
+				{
+					"item": "90",
+					"code": "200008",
+					"name": "Polypropylene Plastic Wrapping Strap",
+					"quantity": 1.25,
+					"unit": "M",
+					"originalUnit": "M",
+					"originalQuantity": "1.25",
+					"coproduct": false
+				},
+				{
+					"item": "100",
+					"code": "200009",
+					"name": "Metal Clip for Palett Wrapping Strap",
+					"quantity": 2,
+					"unit": "PC",
+					"originalUnit": "PC",
+					"originalQuantity": "2",
+					"coproduct": false
+				}
+			]
+		}
+	],
+	conflicts: [
+		{
+			"code": "999999.00.00",
+			"name": "Tomato Peel",
+			"sourceType": "Co-Product",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Strawberry Peel",
+			"sourceType": "By- Product",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Guava Peel",
+			"sourceType": "By- Product",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Mango Peel",
+			"sourceType": "Co-Product",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Hot Chilli Peel",
+			"sourceType": "By- Product",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Lp- Hot Chilli Peel",
+			"sourceType": "FERT",
+			"unit": "KG"
+		},
+		{
+			"code": "999999.00.00",
+			"name": "Apricot Peel",
+			"sourceType": "FERT",
+			"unit": "KG"
+		}
+	]
+};
+//#endregion
+//#region lib/bom.ts
+var masterData = production_master_default;
+function bomPlan(code, target, materials) {
+	const recipe = production_master_default.boms.find((r) => r.code === code);
+	if (!recipe) return null;
+	if (!Number.isFinite(target) || target <= 0) throw Error("أدخل كمية مستهدفة موجبة لحساب BOM");
+	const inputs = [], outputs = [], warnings = [];
+	const visit = (r, amount, path) => {
+		if (path.includes(r.code)) throw Error("حلقة في وصفة التصنيع");
+		for (const l of r.lines) {
+			const m = materials.find((m) => m.code === l.code);
+			let quantity = l.quantity * amount / r.base;
+			const output = quantity < 0 || l.coproduct;
+			quantity = Math.abs(quantity);
+			if (!m) {
+				if (output) {
+					outputs.push({
+						...l,
+						quantity,
+						blocked: true
+					});
+					warnings.push("الكود " + l.code + " معلق لتعارض التوصيف؛ لا يسجل ناتجًا حتى المراجعة");
+					continue;
+				}
+				throw Error("مكون BOM غير موجود: " + l.code);
+			}
+			if (l.unit === "G" && m.unit === "KG") quantity /= 1e3;
+			else if (l.unit !== m.unit) throw Error("وحدة BOM لا تطابق وحدة الصنف " + l.code);
+			const nested = production_master_default.boms.find((x) => x.code === l.code && x.process === "Phantom Packagaing");
+			if (nested && !output) {
+				visit(nested, quantity, [...path, r.code]);
+				continue;
+			}
+			const list = output ? outputs : inputs, existing = list.find((x) => x.code === l.code);
+			if (existing) existing.quantity += quantity;
+			else list.push({
+				code: m.code,
+				name: m.name,
+				unit: m.unit,
+				quantity,
+				source: "BOM",
+				via: path.length ? r.code : void 0
+			});
+		}
+	};
+	const material = materials.find((m) => m.code === code);
+	if (!material || recipe.unit !== material.unit) throw Error("وحدة المنتج لا تطابق BOM");
+	visit(recipe, target, []);
+	for (const l of [...inputs, ...outputs]) {
+		l.quantity = Math.round(l.quantity * 1e3) / 1e3;
+		if (l.quantity <= 0) throw Error("كمية BOM أقل من دقة 0.001؛ راجع الكمية المستهدفة");
+		if (!l.blocked) l.bomQuantity = l.quantity;
+	}
+	return {
+		source: production_master_default.source,
+		revision: production_master_default.revision,
+		code,
+		base: recipe.base,
+		unit: recipe.unit,
+		target,
+		inputs,
+		outputs,
+		warnings: [...new Set(warnings)]
+	};
+}
+//#endregion
 //#region lib/production.ts
 var day = (v) => {
 	const s = required(v, "التاريخ");
@@ -18,6 +2380,7 @@ var decodeOrder = (r) => {
 async function productionOperation(db, u, b) {
 	const now = (/* @__PURE__ */ new Date()).toISOString(), op = b.action, permissions = {
 		production_create: ["production"],
+		production_bom: ["production"],
 		production_requirement: ["production"],
 		production_shift: ["production"],
 		production_close_shift: ["production"],
@@ -33,7 +2396,9 @@ async function productionOperation(db, u, b) {
 		const inv = await inventorySnapshot(db, b.demo === true ? 1 : 0), m = inv.materials.find((m) => m.code === b.code);
 		if (!m || m.category !== (type === "Bulk" ? "semi" : "finished")) throw Error("أضف المنتج في دليل المواد ثم اختر نصف مصنع للـBulk أو منتج تام للـFilling");
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر مخزن الناتج");
+		const plan = bomPlan(m.code, qty(b.target), inv.materials);
 		const data = {
+			bom: plan,
 			type,
 			code: m.code,
 			name: m.name,
@@ -44,7 +2409,7 @@ async function productionOperation(db, u, b) {
 			to,
 			createdAt: now,
 			createdBy: u.email,
-			requirements: [],
+			requirements: plan?.inputs || [],
 			receipts: [],
 			shifts: [],
 			packaging: [],
@@ -56,17 +2421,27 @@ async function productionOperation(db, u, b) {
 				action: "إنشاء أمر " + type
 			}]
 		};
-		const result = await db.run(`INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`, [
+		const result = await db.run(`INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`, [
 			b.demo === true ? 1 : 0,
 			JSON.stringify(data),
 			type === "Bulk" ? "BPO-" : "FO-",
 			type,
 			type,
 			b.demo === true ? 1 : 0,
+			m.code,
 			to,
 			from
 		]);
-		if (!result.changes) throw Error("يوجد أمر Bulk يغطي هذه الفترة؛ افتح أمر الأسبوع الحالي أو اختر فترة غير متداخلة");
+		if (!result.changes) {
+			const conflict = await db.first("SELECT * FROM production_orders WHERE demo=? AND json_extract(data,'$.type') IN ('Bulk','PI01') AND json_extract(data,'$.code')=? AND json_extract(data,'$.from')<=? AND json_extract(data,'$.to')>=? ORDER BY id LIMIT 1", [
+				b.demo === true ? 1 : 0,
+				m.code,
+				to,
+				from
+			]);
+			const c = conflict ? decodeOrder(conflict) : null;
+			throw Error(c ? "يوجد أمر Bulk لهذا المنتج: " + c.number + " — من " + c.data.from + " إلى " + c.data.to + "؛ افتح الأمر الموجود." : "تعارض إنشاء الأمر؛ حدّث الصفحة");
+		}
 		return {
 			ok: true,
 			orderId: result.id
@@ -84,15 +2459,37 @@ async function productionOperation(db, u, b) {
 	};
 	const netIssue = (i) => round(i.quantity - inv.state.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0));
 	const issues = inv.state.issues.filter((i) => i.orderId === raw.id);
+	if (op === "production_bom") {
+		if (d.bom) throw Error("تم تحميل وصفة للأمر بالفعل");
+		const plan = bomPlan(d.code, d.target, inv.materials);
+		if (!plan) throw Error("لا توجد وصفة لهذا المنتج في الملف");
+		d.bom = plan;
+		d.requirements = d.requirements || [];
+		for (const r of plan.inputs) {
+			const old = d.requirements.find((x) => x.code === r.code);
+			if (old) {
+				old.bomQuantity = r.bomQuantity;
+				old.source = "احتياج سابق قبل BOM";
+			} else d.requirements.push(r);
+		}
+		action = "تحميل BOM من " + plan.source;
+	}
 	if (op === "production_requirement") {
 		const m = inv.materials.find((m) => m.code === b.code);
 		if (!m) throw Error("اختر المادة");
 		d.requirements = d.requirements || [];
+		const previous = d.requirements.find((r) => r.code === m.code);
+		const reason = d.bom ? required(b.reason, "سبب إضافة أو تعديل الاحتياج") : String(b.reason || "");
 		const item = {
 			code: m.code,
 			name: m.name,
 			unit: m.unit,
-			quantity: qty(b.quantity)
+			quantity: qty(b.quantity),
+			bomQuantity: previous?.bomQuantity ?? 0,
+			source: d.bom ? previous ? "تعديل احتياج" : "إضافة خارج BOM" : "يدوي",
+			reason,
+			by: u.email,
+			at: now
 		};
 		const index = d.requirements.findIndex((r) => r.code === m.code);
 		if (index >= 0) d.requirements[index] = item;
@@ -137,7 +2534,7 @@ async function productionOperation(db, u, b) {
 			name: d.name,
 			unit: d.unit || "KG"
 		} : inv.materials.find((m) => m.code === b.code && m.category === "byproduct");
-		if (!m) throw Error("اختر مادة ناتج جانبي من الدليل");
+		if (!m || masterData.conflicts.some((x) => x.code === m.code)) throw Error("اختر مادة ناتج جانبي غير متعارضة من الدليل");
 		const warehouse = b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
 		if (!inv.warehouses.some((w) => w.code === warehouse)) throw Error("اختر مخزن الناتج");
 		d.confirmations.push({
@@ -474,6 +2871,7 @@ async function inventorySnapshot(db, demo) {
 	const add = (m) => {
 		if (!materials.some((x) => x.code === m.code)) materials.push(m);
 	};
+	for (const m of masterData.materials) add(m);
 	for (const f of catalog.fruits) add({
 		code: f.code,
 		name: f.name,
@@ -604,6 +3002,7 @@ async function inventorySnapshot(db, demo) {
 		if (l.quality === "R") b.rejected = round(b.rejected + l.balance);
 	}
 	return {
+		masterConflicts: masterData.conflicts,
 		version: raw?.version || 0,
 		state,
 		materials,
@@ -652,6 +3051,7 @@ async function inventoryOperation(db, u, b) {
 	}
 	const lot = inv.lots.find((l) => l.id === b.lotId), material = inv.materials.find((m) => m.code === b.code);
 	const needLot = () => {
+		if (lot && materialBlocked(lot.code)) throw Error("كود المادة معلق لتعارض الماستر داتا");
 		if (!lot || lot.quality !== "A") throw Error("اختر باتش متاحًا ومعتمد الجودة");
 		return lot;
 	};
@@ -659,6 +3059,8 @@ async function inventoryOperation(db, u, b) {
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر المخزن");
 		return b.warehouse;
 	};
+	const materialBlocked = (code) => masterData.conflicts.some((x) => x.code === code);
+	if (b.code && materialBlocked(b.code)) throw Error("الكود مكرر بتوصيفات مختلفة في الماستر داتا؛ راجعه قبل الاستخدام");
 	let description = "";
 	if (op === "inventory_price") {
 		if (!material || !["semi", "finished"].includes(material.category)) throw Error("اختر منتجًا نصف مصنع أو تام");
@@ -718,6 +3120,7 @@ async function inventoryOperation(db, u, b) {
 	}
 	if (["inventory_opening", "inventory_add"].includes(op)) {
 		if (!material) throw Error("اختر مادة من الدليل");
+		if (masterData.materials.some((m) => m.code === material.code && m.phantom)) throw Error("مجموعة التعبئة افتراضية؛ أدخل أرصدة مكوناتها الفعلية");
 		if (["semi", "finished"].includes(material.category) && u.role !== "admin") throw Error("الرصيد الافتتاحي للمنتجات يعتمد بواسطة المدير؛ الناتج الجديد يسجل من أمر التصنيع");
 		d.entries.push({
 			id,
@@ -798,7 +3201,9 @@ async function inventoryOperation(db, u, b) {
 			quantity: amount,
 			at: now,
 			by: u.email,
-			acceptedAt: null
+			acceptedAt: null,
+			sourceOrderId: lot.orderId || null,
+			sourceReference: lot.source
 		});
 		description = "صرف للأمر " + order.number;
 	}
@@ -810,7 +3215,7 @@ async function inventoryOperation(db, u, b) {
 		issue.acceptedBy = u.email;
 		issue.shiftId = shift.id;
 		issue.day = shift.day;
-		description = "استلام الإنتاج للحركة " + issue.id;
+		description = "استلام الإنتاج للأمر " + order.number + " — الحركة " + issue.id;
 	}
 	if (op === "inventory_return") {
 		const issue = d.issues.find((i) => i.id === b.issueId && i.orderId === order.id);
