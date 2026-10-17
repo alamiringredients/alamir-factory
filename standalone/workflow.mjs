@@ -12722,12 +12722,15 @@ async function inventoryOperation(db, u, b) {
 		needWarehouse();
 		const existing = inv.materials.find((m) => m.code === code);
 		if (existing && (existing.unit !== b.unit || existing.category !== b.category)) throw Error("لا يمكن تغيير وحدة أو تصنيف كود موجود؛ أنشئ كودًا جديدًا");
+		const minimum = b.minimum == null ? existing?.minimum ?? null : b.minimum === "" ? null : Number(b.minimum);
+		if (minimum !== null && (!Number.isFinite(minimum) || minimum < 0 || minimum > 1e9 || Math.abs(minimum * 1e3 - Math.round(minimum * 1e3)) > 1e-5)) throw Error("الحد الأدنى يجب أن يكون صفرًا أو كمية موجبة حتى 3 أرقام عشرية");
 		const m = {
 			code,
 			name,
 			category: b.category,
 			unit: b.unit,
-			warehouse: b.warehouse
+			warehouse: b.warehouse,
+			minimum
 		};
 		d.materials = d.materials.filter((x) => x.code !== code);
 		d.materials.push(m);
