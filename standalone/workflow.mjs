@@ -1,3 +1,114 @@
+//#region lib/agricultural-quality.ts
+var truckChecks = [
+	["pests", "وجود آفات"],
+	["foreignMatter", "مواد غريبة"],
+	["chemicals", "مواد كيميائية"],
+	["rust", "صدأ"],
+	["leakage", "تسييل"]
+];
+var fruitChecks = [
+	["mould", "فطر وعفن"],
+	["insects", "إصابات حشرية"],
+	["blackScorch", "لفح سوداء"],
+	["unripe", "غير ناضج"],
+	["yellow", "أصفر"],
+	["broken", "مكسور"],
+	["small", "أحجام صغيرة"],
+	["branches", "أغصان وأوراق"]
+];
+function inspectionSummary(b) {
+	const value = (k) => Number(b["fruit_" + k]) || 0, round = (v) => Math.round(v * 1e3) / 1e3;
+	const complete = truckChecks.every(([k]) => ["PASS", "FAIL"].includes(b["truck_" + k])) && fruitChecks.every(([k]) => b["fruit_" + k] !== "" && b["fruit_" + k] != null && Number.isFinite(Number(b["fruit_" + k])) && Number(b["fruit_" + k]) >= 0 && Number(b["fruit_" + k]) <= 100);
+	const total = round(fruitChecks.reduce((n, [k]) => n + value(k), 0)), groupTotal = round(value("yellow") + value("small") + value("branches"));
+	const failed = truckChecks.filter(([k]) => b["truck_" + k] === "FAIL").map(([k]) => k), reasons = [], manualReasons = [];
+	if (failed.length) reasons.push("يوجد بند غير مطابق في فحص السيارة.");
+	if (value("insects") > 0) reasons.push("وجود إصابة حشرية يستدعي الرفض");
+	if (value("mould") > 0) reasons.push("وجود إصابة فطرية يستدعي الرفض");
+	if (value("blackScorch") > 0) reasons.push("وجود لطعة سوداء يستدعي الرفض");
+	if (value("unripe") > 5) reasons.push("غير الناضج أكثر من 5%");
+	if (value("broken") > 5) reasons.push("المكسور أو المهروس أكثر من 5%");
+	if (groupTotal > 15) reasons.push("مجموعة الأصفر والصغير والأغصان أكثر من 15%");
+	if (total > 20) reasons.push("مجموع عيوب الثمار أكثر من 20%");
+	const groupDeduction = groupTotal <= 5 ? 0 : {
+		"6": 3,
+		"8": 4,
+		"10": 6,
+		"12": 8,
+		"14": 10
+	}[String(groupTotal)] ?? null;
+	if (groupDeduction === null && groupTotal <= 15) manualReasons.push("نسبة المجموعة غير محددة بجدول الخصم؛ تحددها الجودة");
+	if (value("unripe") === 5 || value("broken") === 5) manualReasons.push("حد 5% لغير الناضج أو المكسور يحتاج اعتماد نسبة الخصم يدويًا");
+	return {
+		complete,
+		total,
+		groupTotal,
+		groupDeduction,
+		failed,
+		reasons,
+		manualReasons,
+		calculatedDeduction: !complete || reasons.length || manualReasons.length ? null : round(value("unripe") + value("broken") + (groupDeduction || 0)),
+		recommendation: !complete ? "PENDING" : reasons.length ? "R" : manualReasons.length ? "REVIEW" : "A"
+	};
+}
+function validateAgriculturalInspection(b, now) {
+	const text = (v, label) => {
+		if (typeof v !== "string" || !v.trim() || v.trim().length > 160) throw Error("أدخل " + label + " بشكل صحيح");
+		return v.trim();
+	};
+	const number = (v, label, max) => {
+		const n = Number(v);
+		if (v == null || String(v).trim() === "" || !Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("قيمة غير صالحة: " + label);
+		return n;
+	};
+	const truck = {}, fruit = {};
+	for (const [k, label] of truckChecks) {
+		if (!["PASS", "FAIL"].includes(b["truck_" + k])) throw Error("استكمل فحص السيارة: " + label);
+		truck[k] = b["truck_" + k];
+	}
+	for (const [k, label] of fruitChecks) fruit[k] = number(b["fruit_" + k], label, 100);
+	const summary = inspectionSummary(b);
+	if (summary.total > 100) throw Error("مجموع نسب الثمار المعيبة لا يمكن أن يتجاوز 100%");
+	if (![
+		"A",
+		"B",
+		"C"
+	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
+	if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
+	if (b.confirm !== true) throw Error("أكد قرار الجودة ونسبة الخصم النهائية");
+	const finalDeduction = number(b.deduction, "نسبة الخصم النهائية", 100);
+	const override = summary.recommendation === "R" && b.decision === "A", changed = summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction;
+	const reason = b.decision === "R" || override || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
+	return {
+		schemaVersion: 2,
+		source: "بيان نسب الخصم.docx",
+		policyVersion: "deduction-statement-v1",
+		threshold: 20,
+		groupBasis: "yellow+small+branches",
+		groupTotal: summary.groupTotal,
+		groupDeduction: summary.groupDeduction,
+		rejectionReasons: summary.reasons,
+		manualReasons: summary.manualReasons,
+		truck,
+		fruit,
+		totalDefects: summary.total,
+		calculatedDeduction: summary.calculatedDeduction,
+		finalDeduction,
+		recommendation: summary.recommendation,
+		failedChecks: summary.failed,
+		decision: b.decision,
+		override,
+		reason,
+		shift: b.inspectionShift,
+		allocationNo: text(b.allocationNo, "رقم التخصيص"),
+		lotNo: text(b.lotNo, "رقم اللوت"),
+		brix: number(b.brix, "Brix", 100),
+		ph: number(b.ph, "pH", 14),
+		iodine: text(b.iodine, "Iodine"),
+		qcHead: text(b.qcHead, "اسم رئيس الجودة"),
+		approvedAt: now
+	};
+}
+//#endregion
 //#region lib/cycle-state.ts
 var round$1 = (v) => Math.round(v * 1e3) / 1e3;
 function normalizeCycle(d) {
@@ -13569,6 +13680,7 @@ function createData(b, now, catalog) {
 	if (!Number.isInteger(containers)) throw Error("عدد العبوات يجب أن يكون صحيحًا");
 	return {
 		...catalog ? priceSnapshot(catalog, String(fruit[1]), now) : {},
+		requiresAgriculturalInspection: true,
 		requiresWarehouseReceipt: true,
 		fruitEn: fruit[2] || "",
 		plateKey: normalizePlate(text(b.plate, "لوحة السيارة")),
@@ -13597,12 +13709,21 @@ function transition(row, action, b, role, now) {
 	const d = { ...row.data };
 	let status = "";
 	if (action === "quality") {
+		if (d.requiresAgriculturalInspection || b.agricultural === true) {
+			const q = validateAgriculturalInspection(b, now);
+			d.agriculturalQuality = q;
+			b = {
+				...b,
+				deduction: q.finalDeduction,
+				reason: q.reason
+			};
+		}
 		if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
 		d.decision = b.decision;
 		d.inspection = d.inspection || documentNumber("inspection", row.id);
 		d.deduction = b.deduction === void 0 || b.deduction === null || String(b.deduction).trim() === "" ? 0 : num(b.deduction, "نسبة الخصم", 0, 100);
 		d.qualityAt = now;
-		d.reason = b.decision === "R" ? text(b.reason, "سبب الرفض") : "";
+		d.reason = d.agriculturalQuality?.reason || (b.decision === "R" ? text(b.reason, "سبب الرفض") : "");
 		status = b.decision === "R" ? "rejected" : "gross";
 	} else if (action === "gross") {
 		d.gross = num(b.gross, "الوزن القائم", .001);
