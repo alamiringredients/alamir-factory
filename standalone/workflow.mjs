@@ -1,3 +1,111 @@
+//#region lib/chemical-limits.ts
+var chemicalLimits = [
+	{
+		key: "guava",
+		name: "جوافة",
+		codes: ["300003"],
+		aliases: [
+			"جوافة",
+			"جوافه",
+			"guava"
+		],
+		brix: 7,
+		phMin: 3.8,
+		phMax: 4.2,
+		iodine: false
+	},
+	{
+		key: "mango",
+		name: "مانجو",
+		codes: ["300004"],
+		aliases: ["مانجو", "mango"],
+		brix: 13.5,
+		phMin: 3.6,
+		phMax: 4.5,
+		iodine: false
+	},
+	{
+		key: "tomato",
+		name: "طماطم",
+		codes: ["300000"],
+		aliases: ["طماطم", "tomato"],
+		brix: 4.5,
+		phMin: null,
+		phMax: 4.5,
+		iodine: true
+	},
+	{
+		key: "apricot",
+		name: "مشمش",
+		codes: ["300006"],
+		aliases: ["مشمش", "apricot"],
+		brix: 11,
+		phMin: 3,
+		phMax: 4.5,
+		iodine: false
+	},
+	{
+		key: "peach",
+		name: "خوخ",
+		codes: [],
+		aliases: ["خوخ", "peach"],
+		brix: 10,
+		phMin: 3.2,
+		phMax: 4.1,
+		iodine: false
+	},
+	{
+		key: "chilli",
+		name: "فلفل حار",
+		codes: ["300005"],
+		aliases: [
+			"فلفل",
+			"chilli",
+			"chili"
+		],
+		brix: 8,
+		phMin: 4.2,
+		phMax: 5.2,
+		iodine: false
+	},
+	{
+		key: "strawberry",
+		name: "فراولة",
+		codes: ["300001", "300002"],
+		aliases: [
+			"فراولة",
+			"فراوله",
+			"strawberry",
+			"strawberyy"
+		],
+		brix: 7.5,
+		phMin: 3,
+		phMax: 4,
+		iodine: false
+	}
+];
+function fruitChemicalLimit(ticket) {
+	const direct = chemicalLimits.find((l) => l.codes.includes(String(ticket?.fruitCode)));
+	if (direct) return direct;
+	const name = String(ticket?.fruit || "").trim().toLowerCase();
+	const matches = chemicalLimits.filter((l) => l.aliases.some((a) => name === a || name.startsWith(a + " ")));
+	return matches.length === 1 ? matches[0] : null;
+}
+function chemicalSummary(b, ticket) {
+	const limit = fruitChemicalLimit(ticket), reasons = [];
+	const has = (k) => b[k] != null && String(b[k]).trim() !== "" && Number.isFinite(Number(b[k]));
+	if (limit) {
+		if (has("brix") && Number(b.brix) < limit.brix) reasons.push("Brix أقل من الحد المسموح للصنف");
+		if (has("ph") && (limit.phMin !== null && Number(b.ph) < limit.phMin || Number(b.ph) > limit.phMax)) reasons.push("pH خارج حدود الصنف");
+		if (limit.iodine && b.iodine === "FAIL") reasons.push("Iodine غير مطابق");
+	}
+	return {
+		limit,
+		reasons,
+		complete: Boolean(limit && has("brix") && has("ph") && (!limit.iodine || ["PASS", "FAIL"].includes(b.iodine)))
+	};
+}
+//#endregion
 //#region lib/agricultural-quality.ts
 var truckChecks = [
 	["pests", "وجود آفات"],
@@ -16,7 +124,7 @@ var fruitChecks = [
 	["small", "أحجام صغيرة"],
 	["branches", "أغصان وأوراق"]
 ];
-function inspectionSummary(b) {
+function inspectionSummary(b, ticket = {}) {
 	const value = (k) => Number(b["fruit_" + k]) || 0, round = (v) => Math.round(v * 1e3) / 1e3;
 	const complete = truckChecks.every(([k]) => ["PASS", "FAIL"].includes(b["truck_" + k])) && fruitChecks.every(([k]) => b["fruit_" + k] !== "" && b["fruit_" + k] != null && Number.isFinite(Number(b["fruit_" + k])) && Number(b["fruit_" + k]) >= 0 && Number(b["fruit_" + k]) <= 100);
 	const total = round(fruitChecks.reduce((n, [k]) => n + value(k), 0)), groupTotal = round(value("yellow") + value("small") + value("branches"));
@@ -28,7 +136,9 @@ function inspectionSummary(b) {
 	if (value("unripe") > 5) reasons.push("غير الناضج أكثر من 5%");
 	if (value("broken") > 5) reasons.push("المكسور أو المهروس أكثر من 5%");
 	if (groupTotal > 15) reasons.push("مجموعة الأصفر والصغير والأغصان أكثر من 15%");
-	if (total > 20) reasons.push("مجموع عيوب الثمار أكثر من 20%");
+	if (total > 10) reasons.push("مجموع عيوب الثمار أكثر من 10%");
+	const chemical = chemicalSummary(b, ticket);
+	reasons.push(...chemical.reasons);
 	const groupDeduction = groupTotal <= 5 ? 0 : {
 		"6": 3,
 		"8": 4,
@@ -39,6 +149,7 @@ function inspectionSummary(b) {
 	if (groupDeduction === null && groupTotal <= 15) manualReasons.push("نسبة المجموعة غير محددة بجدول الخصم؛ تحددها الجودة");
 	if (value("unripe") === 5 || value("broken") === 5) manualReasons.push("حد 5% لغير الناضج أو المكسور يحتاج اعتماد نسبة الخصم يدويًا");
 	return {
+		chemical,
 		complete,
 		total,
 		groupTotal,
@@ -47,10 +158,10 @@ function inspectionSummary(b) {
 		reasons,
 		manualReasons,
 		calculatedDeduction: !complete || reasons.length || manualReasons.length ? null : round(value("unripe") + value("broken") + (groupDeduction || 0)),
-		recommendation: !complete ? "PENDING" : reasons.length ? "R" : manualReasons.length ? "REVIEW" : "A"
+		recommendation: reasons.length ? "R" : !complete ? "PENDING" : manualReasons.length ? "REVIEW" : "A"
 	};
 }
-function validateAgriculturalInspection(b, now) {
+function validateAgriculturalInspection(b, now, ticket = {}) {
 	const text = (v, label) => {
 		if (typeof v !== "string" || !v.trim() || v.trim().length > 160) throw Error("أدخل " + label + " بشكل صحيح");
 		return v.trim();
@@ -60,29 +171,54 @@ function validateAgriculturalInspection(b, now) {
 		if (v == null || String(v).trim() === "" || !Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("قيمة غير صالحة: " + label);
 		return n;
 	};
+	const summary = inspectionSummary(b, ticket), reject = b.decision === "R";
+	if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
+	if (b.confirm !== true) throw Error("أكد قرار الجودة");
+	if (!reject && summary.reasons.length) throw Error("الشحنة غير مطابقة؛ لا يمكن قبولها ويجب تأكيد الرفض");
 	const truck = {}, fruit = {};
 	for (const [k, label] of truckChecks) {
-		if (!["PASS", "FAIL"].includes(b["truck_" + k])) throw Error("استكمل فحص السيارة: " + label);
-		truck[k] = b["truck_" + k];
+		const v = b["truck_" + k];
+		if (reject && (v == null || v === "")) {
+			truck[k] = null;
+			continue;
+		}
+		if (!["PASS", "FAIL"].includes(v)) throw Error("استكمل فحص السيارة: " + label);
+		truck[k] = v;
 	}
-	for (const [k, label] of fruitChecks) fruit[k] = number(b["fruit_" + k], label, 100);
-	const summary = inspectionSummary(b);
+	for (const [k, label] of fruitChecks) {
+		const v = b["fruit_" + k];
+		fruit[k] = reject && (v == null || v === "") ? null : number(v, label, 100);
+	}
 	if (summary.total > 100) throw Error("مجموع نسب الثمار المعيبة لا يمكن أن يتجاوز 100%");
-	if (![
+	if (!reject && !summary.chemical.limit) throw Error("لا توجد مواصفة كيميائية لهذا الصنف؛ راجع تعريف الصنف قبل القبول");
+	if (!reject && ![
 		"A",
 		"B",
 		"C"
 	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
-	if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
-	if (b.confirm !== true) throw Error("أكد قرار الجودة ونسبة الخصم النهائية");
-	const finalDeduction = number(b.deduction, "نسبة الخصم النهائية", 100);
-	const override = summary.recommendation === "R" && b.decision === "A", changed = summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction;
-	const reason = b.decision === "R" || override || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
+	if (b.inspectionShift && ![
+		"A",
+		"B",
+		"C"
+	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
+	const finalDeduction = reject ? null : number(b.deduction, "نسبة الخصم النهائية", 100);
+	const changed = !reject && (summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction);
+	const reason = reject || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
+	const optionalText = (k, label) => reject ? b[k] ? text(b[k], label) : null : text(b[k], label);
+	const optionalNumber = (k, max) => reject && (b[k] == null || b[k] === "") ? null : number(b[k], k, max);
+	let iodine = null;
+	if (b.iodine != null && b.iodine !== "") {
+		if (!["PASS", "FAIL"].includes(b.iodine)) throw Error("اختر مطابق أو غير مطابق لليود");
+		iodine = b.iodine;
+	}
+	if (!reject && summary.chemical.limit?.iodine && !iodine) throw Error("استكمل فحص اليود للطماطم");
 	return {
-		schemaVersion: 2,
-		source: "بيان نسب الخصم.docx",
-		policyVersion: "deduction-statement-v1",
-		threshold: 20,
+		schemaVersion: 3,
+		source: "بيان نسب الخصم + مواصفات الاستلام 2026-10-18",
+		policyVersion: "receiving-v3",
+		threshold: 10,
+		chemicalLimits: summary.chemical.limit,
+		chemicalComplete: summary.chemical.complete,
 		groupBasis: "yellow+small+branches",
 		groupTotal: summary.groupTotal,
 		groupDeduction: summary.groupDeduction,
@@ -96,16 +232,17 @@ function validateAgriculturalInspection(b, now) {
 		recommendation: summary.recommendation,
 		failedChecks: summary.failed,
 		decision: b.decision,
-		override,
+		override: false,
 		reason,
-		shift: b.inspectionShift,
-		allocationNo: text(b.allocationNo, "رقم التخصيص"),
-		lotNo: text(b.lotNo, "رقم اللوت"),
-		brix: number(b.brix, "Brix", 100),
-		ph: number(b.ph, "pH", 14),
-		iodine: text(b.iodine, "Iodine"),
-		qcHead: text(b.qcHead, "اسم رئيس الجودة"),
-		approvedAt: now
+		shift: b.inspectionShift || null,
+		allocationNo: optionalText("allocationNo", "رقم التخصيص"),
+		lotNo: optionalText("lotNo", "رقم اللوت"),
+		brix: optionalNumber("brix", 100),
+		ph: optionalNumber("ph", 14),
+		iodine,
+		qcHead: optionalText("qcHead", "اسم رئيس الجودة"),
+		approvedAt: now,
+		earlyRejection: reject && (!summary.complete || !summary.chemical.complete)
 	};
 }
 //#endregion
@@ -13709,8 +13846,8 @@ function transition(row, action, b, role, now) {
 	const d = { ...row.data };
 	let status = "";
 	if (action === "quality") {
-		if (d.requiresAgriculturalInspection || b.agricultural === true) {
-			const q = validateAgriculturalInspection(b, now);
+		{
+			const q = validateAgriculturalInspection(b, now, d);
 			d.agriculturalQuality = q;
 			b = {
 				...b,
