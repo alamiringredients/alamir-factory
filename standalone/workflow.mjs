@@ -246,89 +246,136 @@ function validateAgriculturalInspection(b, now, ticket = {}) {
 	};
 }
 //#endregion
-//#region lib/cycle-state.ts
-var round$1 = (v) => Math.round(v * 1e3) / 1e3;
-function normalizeCycle(d) {
-	for (const key of [
-		"warehouseReceipts",
-		"consumptions",
-		"packs",
-		"customers",
-		"deliveries",
-		"containerReturns",
-		"settlements",
-		"returnRequests",
-		"supplyRequests",
-		"incomingInspections"
-	]) d[key] ||= [];
-	return d;
-}
-function wipRows(inv, orderId) {
-	const d = normalizeCycle(inv.state), waste = /* @__PURE__ */ new Map();
-	for (const o of inv.orders || []) for (const w of o.data.waste || []) {
-		const key = o.id + "|" + w.code;
-		waste.set(key, (waste.get(key) || 0) + w.quantity);
+//#region lib/material-inspection.ts
+var inspectionFields = [
+	["appearance", "المظهر"],
+	["containerIntegrity", "سلامة العبوة"],
+	["length", "الطول"],
+	["width", "العرض"],
+	["height", "الارتفاع"],
+	["thickness", "السمك"],
+	["diameter", "القطر"],
+	["leakage", "الثقوب / التسريب"],
+	["unitWeight", "وزن الوحدة"],
+	["physicalAnalyst", "محلل الفحص الطبيعي"],
+	["concentration", "التركيز"],
+	["ph", "pH"],
+	["purity", "النقاوة"],
+	["solubility", "الذوبان"],
+	["impurities", "الشوائب"],
+	["specificGravity", "الكثافة النوعية"],
+	["chemicalAnalyst", "محلل الفحص الكيميائي"],
+	["mouldYeast", "الفطر والخمائر"],
+	["coliform", "Coliform"],
+	["tpc", "TPC"],
+	["microAnalyst", "محلل الفحص الميكروبي"],
+	["coa", "COA"],
+	["coc", "COC"],
+	["workability", "قابلية التشغيل"],
+	["reviewedBy", "المراجع"]
+];
+var incomingDataFields = [
+	["supplier", "المورد"],
+	["carNumber", "رقم السيارة"],
+	["lotNo", "رقم اللوت"],
+	["productionDate", "تاريخ الإنتاج"],
+	["expiryDate", "تاريخ الصلاحية"]
+];
+var materialSpecifications = {
+	drums: {
+		name: "براميل",
+		height: "950 ± 5 mm",
+		thickness: "0.8 mm",
+		diameter: "527 mm Lower / 570 mm Upper",
+		unitWeight: "12 ± 1 Kg with cover and closing ring",
+		workability: "Accepted"
+	},
+	poly: {
+		name: "أكياس بولي إيثيلين",
+		length: "200 cm",
+		width: "97 cm",
+		thickness: "50 µm",
+		unitWeight: "215.3 g",
+		leakage: "ND",
+		workability: "Accepted"
+	},
+	aseptic: {
+		name: "أكياس أسيبتك",
+		length: "156.5 cm ±5 mm",
+		width: "89 cm ±5 mm",
+		thickness: "340 µm ±7%",
+		unitWeight: "100 g ±7%",
+		leakage: "ND",
+		workability: "Accepted"
+	},
+	pallets: {
+		name: "بالتات",
+		length: "110 cm",
+		width: "110 cm",
+		height: "14 cm",
+		thickness: "not less than 1.8 mm/ board",
+		leakage: "ND",
+		workability: "Accepted"
+	},
+	stretch: {
+		name: "استرتش",
+		leakage: "ND",
+		workability: "Accepted"
+	},
+	caustic: {
+		name: "صودا كاوية سائلة",
+		concentration: "48-50 %",
+		ph: "14 (as supplied)",
+		solubility: "Miscible with water",
+		specificGravity: "1.48 - 1.52"
+	},
+	citric: {
+		name: "حمض الستريك اللامائي",
+		concentration: "0.995",
+		ph: "2 + 0.5",
+		solubility: "Readily soluble in water",
+		tpc: "Not detected",
+		mouldYeast: "Not detected",
+		coliform: "Not detected"
+	},
+	nitric: {
+		name: "حمض النيتريك",
+		ph: "<1",
+		solubility: "Miscible",
+		specificGravity: "1.48 - 1.52"
+	},
+	ascorbic: {
+		name: "حمض الأسكوربيك",
+		concentration: "95-100 %",
+		ph: "2.1-2.6",
+		tpc: "1000 Cfu/g Max",
+		mouldYeast: "100 Cfu/g Max",
+		coliform: "Not detected"
 	}
-	return d.issues.filter((i) => i.acceptedAt && (!orderId || i.orderId === orderId)).map((i) => {
-		const returned = d.returns.filter((r) => r.issueId === i.id).reduce((s, r) => s + r.quantity, 0);
-		const used = d.consumptions.filter((c) => c.issueId === i.id).reduce((s, c) => s + c.quantity, 0);
-		const packed = d.packs.filter((p) => p.issueId === i.id).reduce((s, p) => s + p.quantity, 0);
-		const key = i.orderId + "|" + i.code, loss = Math.min(Math.max(0, i.quantity - returned - used - packed), waste.get(key) || 0);
-		waste.set(key, (waste.get(key) || 0) - loss);
-		const pendingReturn = d.returnRequests.filter((r) => r.issueId === i.id && !r.acceptedAt && !r.cancelledAt).reduce((s, r) => s + r.quantity, 0);
-		const remaining = round$1(i.quantity - returned - used - packed - loss);
-		return {
-			...i,
-			category: i.category || inv.materials?.find((m) => m.code === i.code)?.category,
-			returned,
-			used: round$1(used + packed),
-			waste: round$1(loss),
-			remaining,
-			pendingReturn,
-			free: round$1(remaining - pendingReturn)
-		};
-	});
+};
+function materialProfile(m) {
+	if (m?.qcProfile) return m.qcProfile;
+	return {
+		"200000": "drums",
+		"200010": "drums",
+		"200003": "pallets",
+		"200005": "poly",
+		"300010": "ascorbic"
+	}[m?.code] || "";
 }
-function custodyRows(inv) {
-	const d = normalizeCycle(inv.state);
-	return d.deliveries.flatMap((doc) => doc.packages.filter((p) => p.returnable).map((p) => {
-		const returned = d.containerReturns.filter((r) => r.deliveryId === doc.id && r.packId === p.packId).reduce((s, r) => s + r.quantity, 0);
-		const settled = d.settlements.filter((r) => r.deliveryId === doc.id && r.packId === p.packId).reduce((s, r) => s + r.quantity, 0);
-		return {
-			deliveryId: doc.id,
-			number: doc.number,
-			customerId: doc.customerId,
-			customer: doc.customer,
-			packId: p.packId,
-			code: p.code,
-			name: p.name,
-			unit: p.unit,
-			outgoing: p.quantity,
-			returned,
-			settled,
-			remaining: round$1(p.quantity - returned - settled),
-			due: doc.due,
-			at: doc.at
-		};
-	}));
-}
-function cycleLots(state, lots) {
-	const d = normalizeCycle(state);
-	for (const l of lots) {
-		const receipt = d.warehouseReceipts.find((r) => r.lotId === l.id);
-		l.expectedQuantity = l.quantity;
-		l.warehousePending = Boolean(l.requiresWarehouseReceipt && !receipt);
-		if (l.warehousePending) l.quantity = 0;
-		if (receipt) {
-			l.receiptNumber = receipt.number;
-			l.at = receipt.at;
-			l.by = receipt.by;
-			l.warehouse = receipt.warehouse;
-		}
-		const inspection = d.incomingInspections.find((q) => q.lotId === l.id);
-		if (l.requiresQuality) l.quality = inspection?.decision || "H";
-		l.delivered = round$1(d.deliveries.filter((x) => x.lotId === l.id).reduce((s, x) => s + x.quantity, 0));
+function validateMaterialInspection(b) {
+	const results = {};
+	for (const [key] of inspectionFields) {
+		const value = b["test_" + key];
+		if (value != null && String(value).length > 160) throw Error("نتيجة الفحص طويلة");
+		results[key] = String(value || "").trim();
 	}
+	return {
+		results,
+		specification: materialSpecifications[b.qcProfile] || null,
+		profile: b.qcProfile || "",
+		notes: String(b.notes || "").slice(0, 160)
+	};
 }
 var production_master_default = {
 	source: "Eng. Islam Master Data_update1.xlsx",
@@ -12287,6 +12334,285 @@ function bomPlan(code, target, materials) {
 	};
 }
 //#endregion
+//#region lib/production-cycle.ts
+var round$2 = (n) => Math.round(n * 1e3) / 1e3;
+var text$1 = (v) => {
+	if (typeof v !== "string" || !v.trim() || v.length > 160) throw Error("أدخل المرجع أو الملاحظات بشكل صحيح");
+	return v.trim();
+};
+var quantity = (v) => {
+	const n = Number(v);
+	if (v == null || v === "" || !Number.isFinite(n) || n <= 0 || n > 1e9 || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("أدخل كمية موجبة حتى 3 أرقام عشرية");
+	return n;
+};
+var today = () => new Intl.DateTimeFormat("en-CA", {
+	timeZone: "Africa/Cairo",
+	year: "numeric",
+	month: "2-digit",
+	day: "2-digit"
+}).format(/* @__PURE__ */ new Date());
+function productionState(d) {
+	d.transfers ||= [];
+	d.labelRuns ||= [];
+	if (!d.warehouses.some((w) => w.code === "PROD")) d.warehouses.push({
+		code: "PROD",
+		name: "مخزن الإنتاج"
+	});
+	return d;
+}
+function demoStock(d, materials, demo) {
+	productionState(d);
+	if (!demo || d.demoStockVersion) return;
+	for (const m of materials.filter((m) => [
+		"raw",
+		"packaging",
+		"additive",
+		"other"
+	].includes(m.category) && !m.phantom && !masterData.retired.some((r) => r.code === m.code))) {
+		const id = "DEMO39-" + m.code;
+		if (d.entries.some((e) => e.id === id)) continue;
+		const amount = m.category === "raw" ? m.code === "300010" ? 1e3 : 5e4 : m.unit === "M" ? 1e4 : m.code === "200003" ? 250 : m.code === "200004" ? 5e3 : 1e3;
+		d.entries.push({
+			id,
+			code: m.code,
+			name: m.name,
+			category: m.category,
+			unit: m.unit,
+			warehouse: m.warehouse,
+			batch: "DEMO-" + m.code,
+			quantity: amount,
+			quality: "A",
+			kind: "opening",
+			reason: "رصيد تجريبي للتصنيع",
+			at: "2026-10-18T00:00:00Z",
+			by: "DEMO"
+		});
+	}
+	d.demoStockVersion = 1;
+}
+function transferLots(d, lots) {
+	productionState(d);
+	for (const t of d.transfers.filter((t) => t.receivedAt)) lots.push({
+		...t.material,
+		id: "TR-" + t.id,
+		warehouse: t.toWarehouse,
+		quantity: t.quantity,
+		legacy: 0,
+		source: t.number,
+		kind: "transfer",
+		at: t.receivedAt,
+		by: t.receivedBy,
+		reason: t.reason,
+		quality: "A",
+		requiresQuality: false,
+		requiresWarehouseReceipt: false,
+		originLotId: t.originLotId
+	});
+}
+function transferAmounts(d, id) {
+	return {
+		out: d.transfers.filter((t) => t.sourceLotId === id && t.receivedAt).reduce((n, t) => round$2(n + t.quantity), 0),
+		pending: d.transfers.filter((t) => t.sourceLotId === id && !t.receivedAt && !t.cancelledAt).reduce((n, t) => round$2(n + t.quantity), 0)
+	};
+}
+function packedChoices(inv, bulkCode) {
+	return inv.materials.filter((m) => m.category === "finished" && (!masterData.boms.some((b) => b.code === m.code) || masterData.boms.find((b) => b.code === m.code)?.lines.some((l) => l.code === bulkCode && l.quantity > 0)));
+}
+function bulkLots(inv, finishedCode) {
+	return inv.lots.filter((l) => l.category === "semi" && l.orderId && l.quality === "A" && !l.warehousePending && l.available > 0 && l.color && l.grade && (!finishedCode || (l.allowedFinishedCodes ? l.allowedFinishedCodes.includes(finishedCode) : packedChoices(inv, l.code).some((m) => m.code === finishedCode))));
+}
+function assertProductionLot(order, l) {
+	if ((order.data.cycleVersion || 0) < 3) return;
+	if (l.warehouse !== "PROD") throw Error("حوّل المادة إلى مخزن الإنتاج وأكد استلام التحويل قبل الصرف");
+	if (!order.data.requirements.some((r) => r.code === l.code)) throw Error("أضف المادة إلى احتياجات الأمر قبل الصرف");
+	if (order.data.type === "Filling" && l.category === "semi" && (l.originLotId || l.id) !== order.data.sourceOriginLotId) throw Error("الباتش لا يطابق البلك المعتمد لأمر التعبئة");
+}
+function newInventoryAction(inv, u, b, now, id) {
+	const d = productionState(inv.state), op = b.action;
+	if (op === "inventory_transfer") {
+		const l = inv.lots.find((l) => l.id === b.lotId), amount = quantity(b.quantity);
+		if (!l || l.quality !== "A" || l.warehousePending || amount > l.available) throw Error("الرصيد المعتمد لا يكفي للتحويل");
+		if (l.unit === "PC" && !Number.isInteger(amount)) throw Error("عدد القطع يجب أن يكون صحيحًا");
+		if (!inv.warehouses.some((w) => w.code === b.toWarehouse) || l.warehouse === b.toWarehouse || l.warehouse !== "PROD" && b.toWarehouse !== "PROD") throw Error("اختر تحويلًا من أو إلى مخزن الإنتاج");
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(b.day) || !Number.isFinite(Date.parse(b.day)) || new Date(b.day).toISOString().slice(0, 10) !== b.day || b.day > today()) throw Error("تاريخ التحويل غير صحيح أو مستقبلي");
+		const { id: unused, warehouse, quantity: q, balance, available, reserved, prepared, ...material } = l;
+		d.transfers.push({
+			id,
+			number: "TR-" + String(d.transfers.length + 1).padStart(7, "0"),
+			sourceLotId: l.id,
+			originLotId: l.originLotId || l.id,
+			material,
+			code: l.code,
+			name: l.name,
+			unit: l.unit,
+			batch: l.batch,
+			quantity: amount,
+			fromWarehouse: l.warehouse,
+			toWarehouse: b.toWarehouse,
+			day: b.day,
+			reason: text$1(b.reason),
+			at: now,
+			by: u.email
+		});
+		return "تجهيز تحويل مخزن الإنتاج";
+	}
+	if (["inventory_transfer_accept", "inventory_transfer_cancel"].includes(op)) {
+		const t = d.transfers.find((t) => t.id === b.transferId && !t.receivedAt && !t.cancelledAt);
+		if (!t) throw Error("التحويل غير متاح أو تم اعتماده");
+		if (op === "inventory_transfer_cancel") {
+			t.cancelledAt = now;
+			t.cancelledBy = u.email;
+			t.cancelReason = text$1(b.reason);
+			return "إلغاء تحويل مخزني";
+		}
+		if (u.role !== "admin" && (t.toWarehouse === "PROD" ? u.role !== "production" : u.role !== "warehouse")) throw Error("تأكيد التحويل من صلاحية مستلم المخزن");
+		const l = inv.lots.find((l) => l.id === t.sourceLotId);
+		if (!l || l.quality !== "A" || l.warehousePending || l.balance < t.quantity) throw Error("المادة لم تعد متاحة للتحويل");
+		t.receivedAt = now;
+		t.receivedBy = u.email;
+		return "اعتماد استلام تحويل مخزن الإنتاج";
+	}
+	if (op === "inventory_label_link") {
+		const r = d.labelRuns.find((r) => r.id === b.runId && !r.outputLotId), o = inv.orders.find((o) => o.id === Number(b.orderId)), c = o?.data.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
+		if (!r || !c || o.data.type !== "Filling" || r.code !== c.code || r.batch !== c.batch) throw Error("اختر دفعة معبأة تطابق كود وباتش الملصقات");
+		const count = (o.data.weights || []).filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.count, 0), used = d.labelRuns.filter((x) => x.outputLotId === "P-" + o.id + "-" + c.id).reduce((n, x) => n + x.count, 0);
+		if (r.count + used > count) throw Error("عدد الملصقات أكبر من عدد العبوات المسجلة");
+		Object.assign(r, {
+			outputLotId: "P-" + o.id + "-" + c.id,
+			orderId: o.id,
+			orderNumber: o.number,
+			linkedAt: now,
+			linkedBy: u.email
+		});
+		return "ربط الملصقات بالعبوات المنتجة";
+	}
+	if (op === "inventory_labels") {
+		const m = inv.materials.find((m) => m.code === b.code && m.category === "finished");
+		if (!m) throw Error("اختر المنتج المعبأ");
+		const count = Number(b.count);
+		if (!Number.isSafeInteger(count) || count < 1 || count > 500) throw Error("عدد الملصقات من 1 إلى 500");
+		const date = (v) => {
+			if (!v) return "";
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0, 10) !== v) throw Error("تاريخ الملصق غير صحيح");
+			return v;
+		};
+		const productionDate = date(b.productionDate), expiryDate = date(b.expiryDate);
+		if (productionDate && expiryDate && expiryDate < productionDate) throw Error("الصلاحية تسبق الإنتاج");
+		let o = null;
+		if (b.orderId) {
+			o = inv.orders.find((o) => o.id === Number(b.orderId));
+			if (!o || o.data.type !== "Filling" || o.data.code !== m.code) throw Error("أمر التعبئة لا يطابق المنتج");
+		}
+		const start = d.labelRuns.reduce((n, r) => Math.max(n, r.end), 0) + 1;
+		d.labelRuns.push({
+			id,
+			number: "LP-" + String(d.labelRuns.length + 1).padStart(7, "0"),
+			code: m.code,
+			name: m.name,
+			batch: text$1(b.batch),
+			count,
+			start,
+			end: start + count - 1,
+			serialPrefix: b.demo === true ? "LB-D-" : "LB-L-",
+			orderId: o?.id || null,
+			orderNumber: o?.number || "",
+			nominalWeight: b.nominalWeight == null || b.nominalWeight === "" ? null : quantity(b.nominalWeight),
+			productionDate,
+			expiryDate,
+			notes: String(b.notes || "").slice(0, 160),
+			at: now,
+			by: u.email
+		});
+		return "حجز أرقام ملصقات مستقلة";
+	}
+	return null;
+}
+//#endregion
+//#region lib/cycle-state.ts
+var round$1 = (v) => Math.round(v * 1e3) / 1e3;
+function normalizeCycle(d) {
+	for (const key of [
+		"warehouseReceipts",
+		"consumptions",
+		"packs",
+		"customers",
+		"deliveries",
+		"containerReturns",
+		"settlements",
+		"returnRequests",
+		"supplyRequests",
+		"incomingInspections"
+	]) d[key] ||= [];
+	return d;
+}
+function wipRows(inv, orderId) {
+	const d = normalizeCycle(inv.state), waste = /* @__PURE__ */ new Map();
+	for (const o of inv.orders || []) for (const w of o.data.waste || []) {
+		const key = o.id + "|" + w.code;
+		waste.set(key, (waste.get(key) || 0) + w.quantity);
+	}
+	return d.issues.filter((i) => i.acceptedAt && (!orderId || i.orderId === orderId)).map((i) => {
+		const returned = d.returns.filter((r) => r.issueId === i.id).reduce((s, r) => s + r.quantity, 0);
+		const used = d.consumptions.filter((c) => c.issueId === i.id).reduce((s, c) => s + c.quantity, 0);
+		const packed = d.packs.filter((p) => p.issueId === i.id).reduce((s, p) => s + p.quantity, 0);
+		const key = i.orderId + "|" + i.code, loss = Math.min(Math.max(0, i.quantity - returned - used - packed), waste.get(key) || 0);
+		waste.set(key, (waste.get(key) || 0) - loss);
+		const pendingReturn = d.returnRequests.filter((r) => r.issueId === i.id && !r.acceptedAt && !r.cancelledAt).reduce((s, r) => s + r.quantity, 0);
+		const remaining = round$1(i.quantity - returned - used - packed - loss);
+		return {
+			...i,
+			category: i.category || inv.materials?.find((m) => m.code === i.code)?.category,
+			returned,
+			used: round$1(used + packed),
+			waste: round$1(loss),
+			remaining,
+			pendingReturn,
+			free: round$1(remaining - pendingReturn)
+		};
+	});
+}
+function custodyRows(inv) {
+	const d = normalizeCycle(inv.state);
+	return d.deliveries.flatMap((doc) => doc.packages.filter((p) => p.returnable).map((p) => {
+		const returned = d.containerReturns.filter((r) => r.deliveryId === doc.id && r.packId === p.packId).reduce((s, r) => s + r.quantity, 0);
+		const settled = d.settlements.filter((r) => r.deliveryId === doc.id && r.packId === p.packId).reduce((s, r) => s + r.quantity, 0);
+		return {
+			deliveryId: doc.id,
+			number: doc.number,
+			customerId: doc.customerId,
+			customer: doc.customer,
+			packId: p.packId,
+			code: p.code,
+			name: p.name,
+			unit: p.unit,
+			outgoing: p.quantity,
+			returned,
+			settled,
+			remaining: round$1(p.quantity - returned - settled),
+			due: doc.due,
+			at: doc.at
+		};
+	}));
+}
+function cycleLots(state, lots) {
+	const d = normalizeCycle(state);
+	for (const l of lots) {
+		const receipt = d.warehouseReceipts.find((r) => r.lotId === l.id);
+		l.expectedQuantity = l.quantity;
+		l.warehousePending = Boolean(l.requiresWarehouseReceipt && !receipt);
+		if (l.warehousePending) l.quantity = 0;
+		if (receipt) {
+			l.receiptNumber = receipt.number;
+			l.at = receipt.at;
+			l.by = receipt.by;
+			l.warehouse = receipt.warehouse;
+		}
+		const inspection = d.incomingInspections.find((q) => q.lotId === l.id);
+		if (l.requiresQuality) l.quality = inspection?.decision || "H";
+		l.delivered = round$1(d.deliveries.filter((x) => x.lotId === l.id).reduce((s, x) => s + x.quantity, 0));
+	}
+}
+//#endregion
 //#region lib/production.ts
 var day = (v) => {
 	const s = required(v, "التاريخ");
@@ -12306,6 +12632,7 @@ var decodeOrder = (r) => {
 };
 async function productionOperation(db, u, b) {
 	const now = (/* @__PURE__ */ new Date()).toISOString(), op = b.action, permissions = {
+		production_weigh: ["production"],
 		production_create: ["production"],
 		production_bom: ["production"],
 		production_requirement: ["production"],
@@ -12324,8 +12651,22 @@ async function productionOperation(db, u, b) {
 		if (!m || m.category !== (type === "Bulk" ? "semi" : "finished")) throw Error("أضف المنتج في دليل المواد ثم اختر نصف مصنع للـBulk أو منتج تام للـFilling");
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر مخزن الناتج");
 		const plan = bomPlan(m.code, qty(b.target), inv.materials);
+		let source = null;
+		if (type === "Filling") {
+			source = bulkLots(inv, m.code).find((l) => l.id === b.sourceLotId);
+			if (!source) throw Error("اختر باتش بلك معتمد اللون والجودة لهذا المنتج");
+			if (qty(b.target) > source.available) throw Error("مستهدف التعبئة أكبر من المتاح في باتش البلك");
+		}
 		const data = {
-			cycleVersion: 2,
+			cycleVersion: 3,
+			processType: type === "Bulk" ? "PI01" : "PI02",
+			sourceLotId: source?.id || null,
+			sourceOriginLotId: source ? source.originLotId || source.id : null,
+			sourceOrderId: source?.orderId || null,
+			sourceBatch: source?.batch || "",
+			sourceColor: source?.color || "",
+			sourceGrade: source?.grade || "",
+			notes: String(b.notes || "").slice(0, 160),
 			bom: plan,
 			type,
 			code: m.code,
@@ -12337,7 +12678,13 @@ async function productionOperation(db, u, b) {
 			to,
 			createdAt: now,
 			createdBy: u.email,
-			requirements: plan?.inputs || [],
+			requirements: plan?.inputs || (source ? [{
+				code: source.code,
+				name: source.name,
+				unit: source.unit,
+				quantity: qty(b.target),
+				source: "البلك المختار"
+			}] : []),
 			receipts: [],
 			shifts: [],
 			packaging: [],
@@ -12447,7 +12794,8 @@ async function productionOperation(db, u, b) {
 			day: date,
 			openedAt: now,
 			openedBy: u.email,
-			closedAt: null
+			closedAt: null,
+			notes: String(b.notes || "").slice(0, 160)
 		});
 		d.executionStart = d.executionStart || now;
 		action = "فتح الشفت " + name;
@@ -12472,7 +12820,22 @@ async function productionOperation(db, u, b) {
 		if (!m || masterData.conflicts.some((x) => x.code === m.code)) throw Error("اختر مادة ناتج جانبي غير متعارضة من الدليل");
 		const warehouse = b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
 		if (!inv.warehouses.some((w) => w.code === warehouse)) throw Error("اختر مخزن الناتج");
+		if (b.batch && inv.lots.some((l) => l.code === m.code && l.batch === b.batch)) throw Error("الباتش مستخدم لهذا المنتج");
+		const amount = qty(b.quantity);
+		if (d.cycleVersion >= 3 && b.kind === "main") {
+			const basic = d.type === "Filling" ? "semi" : "raw";
+			const input = accepted.filter((i) => i.category === basic).reduce((n, i) => n + netIssue(i), 0), prior = d.confirmations.filter((c) => c.kind === "main").reduce((n, c) => n + c.quantity, 0);
+			if (amount + prior > input) throw Error("الناتج يتجاوز كمية الخام المستلمة للأمر");
+			if (d.type === "Filling" && d.bom) for (const r of d.bom.inputs) {
+				const required = r.quantity * (prior + amount) / d.target;
+				if (accepted.filter((i) => i.code === r.code).reduce((n, i) => n + netIssue(i), 0) + 1e-4 < required) throw Error("استكمل استلام مكونات BOM للكمية المنتجة: " + r.code);
+			}
+			if (d.type === "Bulk") required(b.cipRef, "مرجع دورة CIP");
+		}
 		d.confirmations.push({
+			cipRef: String(b.cipRef || "").slice(0, 160),
+			tank: String(b.tank || "").slice(0, 160),
+			notes: String(b.notes || "").slice(0, 160),
 			id: "CF-" + (d.confirmations.length + 1),
 			shiftId: s.id,
 			day: s.day,
@@ -12483,13 +12846,36 @@ async function productionOperation(db, u, b) {
 			warehouse,
 			quantity: qty(b.quantity),
 			requiresWarehouseReceipt: true,
-			batch: order.batch + "-CF-" + (d.confirmations.length + 1),
+			batch: b.batch ? required(b.batch, "الباتش") : order.batch + "-CF-" + (d.confirmations.length + 1),
 			stock: b.kind === "main" ? "Quality Stock" : "Unrestricted Stock",
 			at: now,
 			by: u.email,
 			decision: null
 		});
 		action = "تسجيل ناتج إلى المخزن";
+	}
+	if (op === "production_weigh") {
+		const c = d.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
+		if (d.type !== "Filling" || !c) throw Error("اختر دفعة منتج معبأ");
+		const s = openShift();
+		const count = Number(b.count), gross = qty(b.gross), tare = qty(b.tare), net = round(gross - tare);
+		if (!Number.isSafeInteger(count) || count <= 0 || count > 1e5 || net <= 0) throw Error("راجع عدد العبوات وأوزانها");
+		d.weights ||= [];
+		if (net + d.weights.filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.net, 0) > c.quantity) throw Error("صافي أوزان العبوات يتجاوز كمية الناتج");
+		d.weights.push({
+			id: "WT-" + (d.weights.length + 1),
+			confirmationId: c.id,
+			count,
+			gross,
+			tare,
+			net,
+			shiftId: s.id,
+			day: s.day,
+			notes: String(b.notes || "").slice(0, 160),
+			at: now,
+			by: u.email
+		});
+		action = "تسجيل أوزان العبوات";
 	}
 	if (op === "production_waste") {
 		const s = openShift(), m = inv.materials.find((m) => m.code === b.code);
@@ -12516,7 +12902,7 @@ async function productionOperation(db, u, b) {
 		action = "تسجيل هالك من المواد المصروفة";
 	}
 	if (op === "production_quality") {
-		const c = d.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
+		const c = d.confirmations.find((c) => c.id === b.confirmationId && (c.kind === "main" || d.cycleVersion >= 3));
 		if (!c || ["A", "R"].includes(c.decision)) throw Error("الفحص غير متاح أو معتمد بالفعل");
 		if (![
 			"A",
@@ -12525,6 +12911,7 @@ async function productionOperation(db, u, b) {
 		].includes(b.decision)) throw Error("اختر قرار الجودة");
 		const color = String(b.color || "").trim(), grade = String(b.grade || "").trim();
 		if (b.decision === "A") {
+			if (d.cycleVersion >= 3 && d.type === "Filling" && c.kind === "main" && round((d.weights || []).filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.net, 0)) !== c.quantity) throw Error("استكمل تسجيل أوزان العبوات لتطابق كمية الناتج");
 			required(color, "قيمة اللون");
 			required(grade, "تصنيف الجودة");
 		}
@@ -12537,7 +12924,22 @@ async function productionOperation(db, u, b) {
 			"extra2Name",
 			"extra2Value"
 		]) if (String(b[key] || "").length > 160) throw Error("نص الفحص طويل");
+		const extraNum = (key, max) => {
+			if (b[key] == null || b[key] === "") return null;
+			const n = Number(b[key]);
+			if (!Number.isFinite(n) || n < 0 || n > max) throw Error("نتيجة التحليل غير صحيحة");
+			return n;
+		};
+		let allowedFinishedCodes = void 0;
+		if (d.type === "Bulk" && c.kind === "main" && d.cycleVersion >= 3 && b.decision === "A") {
+			const options = packedChoices(inv, d.code);
+			if (!Array.isArray(b.allowedFinishedCodes) || !b.allowedFinishedCodes.length || b.allowedFinishedCodes.some((code) => !options.some((m) => m.code === code))) throw Error("حدد المنتجات المعبأة المتوافقة مع نتيجة هذا الباتش");
+			allowedFinishedCodes = [...new Set(b.allowedFinishedCodes)];
+		}
 		Object.assign(c, {
+			allowedFinishedCodes,
+			brix: extraNum("brix", 100),
+			ph: extraNum("ph", 14),
 			decision: b.decision,
 			color,
 			grade,
@@ -12554,12 +12956,12 @@ async function productionOperation(db, u, b) {
 		action = "جودة " + c.id + " — " + b.decision;
 	}
 	if (op === "production_close") {
-		if (d.cycleVersion === 2 && wipRows(inv, raw.id).some((r) => r.remaining > 0)) throw Error("سوِّ المواد المتبقية لدى الإنتاج بالاستهلاك أو المرتجع");
+		if (d.cycleVersion >= 2 && wipRows(inv, raw.id).some((r) => r.remaining > 0)) throw Error("سوِّ المواد المتبقية لدى الإنتاج بالاستهلاك أو المرتجع");
 		if (inv.lots.some((l) => l.orderId === raw.id && l.warehousePending)) throw Error("استكمل استلام الناتج بالمخزن");
 		if ((inv.state.preparations || []).some((p) => p.orderId === raw.id && p.quantity > p.received + p.cancelled)) throw Error("استلم أو ألغِ التجهيزات المعلقة");
 		if (!d.confirmations.length) throw Error("لا يوجد إنتاج مسجل");
 		if (d.shifts.some((s) => !s.closedAt)) throw Error("أغلق الشفتات");
-		if (d.confirmations.some((c) => c.kind === "main" && !["A", "R"].includes(c.decision))) throw Error("استكمل فحوص الجودة المعلقة");
+		if (d.confirmations.some((c) => (c.kind === "main" || d.cycleVersion >= 3) && !["A", "R"].includes(c.decision))) throw Error("استكمل فحوص الجودة المعلقة");
 		if (issues.some((i) => !i.acceptedAt && netIssue(i) > 0)) throw Error("أكد استلام المواد المصروفة أو أرجعها");
 		if (inv.state.reservations.some((r) => r.orderId === raw.id && r.remaining > 0)) throw Error("اصرف أو فك الحجوزات المتبقية");
 		d.closedAt = now;
@@ -12749,7 +13151,7 @@ var categories = {
 	raw: "مواد خام",
 	packaging: "تعبئة وتغليف",
 	additive: "إضافات تصنيع",
-	semi: "نصف مصنع",
+	semi: "منتج غير معبأ — Bulk",
 	finished: "منتج تام",
 	byproduct: "ناتج جانبي"
 };
@@ -12806,6 +13208,7 @@ async function inventorySnapshot(db, demo) {
 	state.salePrices = state.salePrices || [];
 	state.preparations = state.preparations || [];
 	normalizeCycle(state);
+	productionState(state);
 	const [tickets, orders, cat] = await Promise.all([
 		db.all("SELECT * FROM tickets WHERE demo=?", [demo]),
 		db.all("SELECT * FROM production_orders WHERE demo=?", [demo]),
@@ -12840,6 +13243,7 @@ async function inventorySnapshot(db, demo) {
 			warehouse: "PACK"
 		});
 	}
+	demoStock(state, materials, demo);
 	const lots = [];
 	for (const t of ts.filter((t) => t.status === "done" && t.data.decision === "A")) {
 		const d = t.data;
@@ -12883,9 +13287,12 @@ async function inventorySnapshot(db, demo) {
 			quantity: c.quantity,
 			requiresWarehouseReceipt: c.requiresWarehouseReceipt === true,
 			legacy: 0,
-			quality: c.kind === "byproduct" ? "A" : c.decision || "H",
+			quality: c.kind === "byproduct" && (o.data.cycleVersion || 0) < 3 ? "A" : c.decision || "H",
 			color: c.color || c.colorDescription || "",
 			grade: c.grade || "",
+			allowedFinishedCodes: c.allowedFinishedCodes,
+			cipRef: c.cipRef,
+			confirmationId: c.id,
 			extra1Name: c.extra1Name || "",
 			extra1Value: c.extra1Value || "",
 			extra2Name: c.extra2Name || "",
@@ -12907,13 +13314,16 @@ async function inventorySnapshot(db, demo) {
 			source: e.kind === "opening" ? "رصيد افتتاحي" : "إضافة مخزنية"
 		});
 	}
+	transferLots(state, lots);
 	cycleLots(state, lots);
 	for (const l of lots) {
+		const tx = transferAmounts(state, l.id);
+		l.transferred = tx.out;
 		l.issued = round(state.issues.filter((i) => i.lotId === l.id).reduce((n, i) => n + i.quantity, 0) - state.returns.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.quantity, 0) + l.legacy);
 		l.adjustment = state.adjustments.filter((a) => a.lotId === l.id).reduce((n, a) => n + a.quantity, 0);
-		l.balance = round(l.quantity + l.adjustment - l.issued - l.delivered);
+		l.balance = round(l.quantity + l.adjustment - l.issued - l.delivered - l.transferred);
 		l.prepared = round(state.preparations.filter((p) => p.lotId === l.id).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0));
-		l.reserved = round(l.prepared + state.reservations.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.remaining, 0));
+		l.reserved = round(tx.pending + l.prepared + state.reservations.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.remaining, 0));
 		l.available = l.quality === "A" && !l.warehousePending ? round(l.balance - l.reserved) : 0;
 	}
 	const today = new Intl.DateTimeFormat("en-CA", {
@@ -12989,6 +13399,13 @@ async function inventoryOperation(db, u, b) {
 		"inventory_release",
 		"inventory_accept"
 	];
+	const shared = [
+		"inventory_transfer",
+		"inventory_transfer_accept",
+		"inventory_transfer_cancel",
+		"inventory_labels",
+		"inventory_label_link"
+	];
 	const warehouse = [
 		"inventory_opening",
 		"inventory_add",
@@ -12997,11 +13414,12 @@ async function inventoryOperation(db, u, b) {
 		"inventory_cancel_prepare",
 		"inventory_return"
 	];
-	if (u.role !== "admin" && !(production.includes(op) && u.role === "production") && !(warehouse.includes(op) && u.role === "warehouse")) throw Error("لا توجد صلاحية لهذه الحركة");
+	if (u.role !== "admin" && !(production.includes(op) && u.role === "production") && !(warehouse.includes(op) && u.role === "warehouse") && !(shared.includes(op) && ["production", "warehouse"].includes(u.role))) throw Error("لا توجد صلاحية لهذه الحركة");
 	if (![
 		...admin,
 		...production,
-		...warehouse
+		...warehouse,
+		...shared
 	].includes(op)) throw Error("إجراء مخزني غير معروف");
 	const inv = await inventorySnapshot(db, demo);
 	if (!Number.isInteger(b.inventoryVersion) || inv.version !== b.inventoryVersion) throw Error("الأرصدة تغيرت من جهاز آخر؛ حدّث الصفحة");
@@ -13029,7 +13447,7 @@ async function inventoryOperation(db, u, b) {
 	};
 	const materialBlocked = (code) => masterData.conflicts.some((x) => x.code === code) || masterData.retired.some((x) => x.code === code);
 	if (b.code && materialBlocked(b.code)) throw Error("الكود مكرر بتوصيفات مختلفة في الماستر داتا؛ راجعه قبل الاستخدام");
-	let description = "";
+	let description = newInventoryAction(inv, u, b, now, id) || "";
 	if (op === "inventory_price") {
 		if (!material || !["semi", "finished"].includes(material.category)) throw Error("اختر منتجًا نصف مصنع أو تام");
 		const from = required(b.from, "بداية السعر"), to = required(b.to, "نهاية السعر");
@@ -13075,8 +13493,10 @@ async function inventoryOperation(db, u, b) {
 			warehouse: b.warehouse,
 			minimum,
 			returnable: b.returnable === void 0 ? Boolean(existing?.returnable) : b.returnable === true,
+			qcProfile: b.qcProfile === void 0 ? existing?.qcProfile || "" : String(b.qcProfile || ""),
 			requiresQuality: b.requiresQuality === void 0 ? Boolean(existing?.requiresQuality) : b.requiresQuality === true
 		};
+		if (m.qcProfile && !materialSpecifications[m.qcProfile]) throw Error("اختر مواصفة فحص معروفة");
 		if (m.returnable && (m.category !== "packaging" || m.unit !== "PC")) throw Error("العهدة تتطلب صنف تعبئة بوحدة قطعة");
 		d.materials = d.materials.filter((x) => x.code !== code);
 		d.materials.push(m);
@@ -13096,7 +13516,12 @@ async function inventoryOperation(db, u, b) {
 		if (!material) throw Error("اختر مادة من الدليل");
 		if (masterData.materials.some((m) => m.code === material.code && m.phantom)) throw Error("مجموعة التعبئة افتراضية؛ أدخل أرصدة مكوناتها الفعلية");
 		if (["semi", "finished"].includes(material.category) && u.role !== "admin") throw Error("الرصيد الافتتاحي للمنتجات يعتمد بواسطة المدير؛ الناتج الجديد يسجل من أمر التصنيع");
+		const incoming = {};
+		for (const [key] of incomingDataFields) incoming[key] = String(b[key] || "").trim().slice(0, 160);
+		for (const key of ["productionDate", "expiryDate"]) if (incoming[key] && (!/^\d{4}-\d{2}-\d{2}$/.test(incoming[key]) || !Number.isFinite(Date.parse(incoming[key])) || new Date(incoming[key]).toISOString().slice(0, 10) !== incoming[key])) throw Error("تاريخ الوارد غير صحيح");
+		if (incoming.productionDate && incoming.expiryDate && incoming.expiryDate < incoming.productionDate) throw Error("الصلاحية تسبق الإنتاج");
 		d.entries.push({
+			...incoming,
 			id,
 			code: material.code,
 			name: material.name,
@@ -13106,7 +13531,8 @@ async function inventoryOperation(db, u, b) {
 			batch: required(b.batch, "الباتش"),
 			quantity: qty(b.quantity),
 			requiresWarehouseReceipt: op === "inventory_add",
-			requiresQuality: op === "inventory_add" && Boolean(material.requiresQuality),
+			requiresQuality: op === "inventory_add" && Boolean(material.requiresQuality || material.category === "packaging" || materialProfile(material)),
+			qcProfile: materialProfile(material),
 			kind: op === "inventory_opening" ? "opening" : "addition",
 			reason: required(b.reason, "مرجع الإضافة"),
 			at: now,
@@ -13130,6 +13556,7 @@ async function inventoryOperation(db, u, b) {
 	}
 	if (op === "inventory_reserve") {
 		needLot();
+		assertProductionLot(order, lot);
 		const amount = qty(b.quantity);
 		if (amount > lot.available) throw Error("الرصيد المتاح لا يكفي للحجز");
 		d.reservations.push({
@@ -13153,6 +13580,7 @@ async function inventoryOperation(db, u, b) {
 	}
 	const prepare = (lotId, amount) => {
 		const l = inv.lots.find((x) => x.id === lotId);
+		if (l) assertProductionLot(order, l);
 		if (!l || l.quality !== "A" || l.warehousePending || materialBlocked(l.code)) throw Error("اختر باتش متاحًا لمادة فعلية");
 		if (b.supplyRequestId) {
 			const req = d.supplyRequests.find((r) => r.id === b.supplyRequestId && r.orderId === order.id && r.code === l.code && !r.cancelledAt);
@@ -13231,6 +13659,7 @@ async function inventoryOperation(db, u, b) {
 			const amount = qty(b.quantity);
 			if (!p || amount > round(p.quantity - p.received - p.cancelled)) throw Error("الاستلام يتجاوز المتبقي أو تم تأكيده بالفعل");
 			const l = inv.lots.find((x) => x.id === p.lotId);
+			if (l) assertProductionLot(order, l);
 			if (!l || l.quality !== "A" || l.warehousePending || amount > l.balance) throw Error("الباتش غير متاح للاستلام");
 			p.received = round(p.received + amount);
 			d.issues.push({
@@ -13253,7 +13682,8 @@ async function inventoryOperation(db, u, b) {
 				day: shift.day,
 				preparationId: p.id,
 				sourceOrderId: p.sourceOrderId,
-				sourceReference: p.sourceReference
+				sourceReference: p.sourceReference,
+				notes: String(b.notes || "").slice(0, 160)
 			});
 		} else {
 			const issue = d.issues.find((i) => i.id === b.issueId && i.orderId === order.id);
@@ -13380,6 +13810,7 @@ async function warehouseCycle(db, u, b) {
 	if (op === "cycle_receive") {
 		const l = lot();
 		if (!l.warehousePending) throw Error("تم استلام الباتش بالمخزن بالفعل");
+		if (l.category === "finished" && guardOrder?.data.cycleVersion >= 3 && l.quality !== "A") throw Error("اعتمد جودة المنتج المعبأ قبل استلام المخزن");
 		if (qty(b.quantity) !== l.expectedQuantity) throw Error("كمية الاستلام لا تطابق المستند؛ راجع الفرق قبل الاعتماد");
 		if (l.id.startsWith("T-")) guardTicket = await db.first("SELECT id,version FROM tickets WHERE id=? AND demo=?", [Number(l.id.slice(2)), demo]);
 		d.warehouseReceipts.push({
@@ -13407,6 +13838,10 @@ async function warehouseCycle(db, u, b) {
 		d.incomingInspections = d.incomingInspections.filter((q) => q.lotId !== l.id);
 		d.incomingInspections.push({
 			...base,
+			...validateMaterialInspection({
+				...b,
+				qcProfile: l.qcProfile || ""
+			}),
 			lotId: l.id,
 			decision: b.decision,
 			reason: String(b.reason || "").slice(0, 160)
@@ -13471,7 +13906,7 @@ async function warehouseCycle(db, u, b) {
 			description = "تسجيل استهلاك فعلي";
 		} else if (op === "cycle_pack") {
 			const s = shift(o), l = lot(), m = inv.materials.find((m) => m.code === i.code);
-			if (i.category !== "packaging" || l.category !== "finished" || l.orderId !== o.id || l.delivered > 0) throw Error("اختر دفعة منتج تام لنفس الأمر قبل التسليم");
+			if (i.category !== "packaging" || !["finished", ...o.data.cycleVersion >= 3 ? ["semi", "byproduct"] : []].includes(l.category) || l.orderId !== o.id || l.delivered > 0) throw Error("اختر دفعة منتج تام لنفس الأمر قبل التسليم");
 			if (i.unit === "PC" && !Number.isInteger(amount)) throw Error("عدد العبوات يجب أن يكون صحيحًا");
 			d.packs.push({
 				...common,
