@@ -1,249 +1,204 @@
-//#region lib/chemical-limits.ts
-var chemicalLimits = [
-	{
-		key: "guava",
-		name: "جوافة",
-		codes: ["300003"],
-		aliases: [
-			"جوافة",
-			"جوافه",
-			"guava"
-		],
-		brix: 7,
-		phMin: 3.8,
-		phMax: 4.2,
-		iodine: false
-	},
-	{
-		key: "mango",
-		name: "مانجو",
-		codes: ["300004"],
-		aliases: ["مانجو", "mango"],
-		brix: 13.5,
-		phMin: 3.6,
-		phMax: 4.5,
-		iodine: false
-	},
-	{
-		key: "tomato",
-		name: "طماطم",
-		codes: ["300000"],
-		aliases: ["طماطم", "tomato"],
-		brix: 4.5,
-		phMin: null,
-		phMax: 4.5,
-		iodine: true
-	},
-	{
-		key: "apricot",
-		name: "مشمش",
-		codes: ["300006"],
-		aliases: ["مشمش", "apricot"],
-		brix: 11,
-		phMin: 3,
-		phMax: 4.5,
-		iodine: false
-	},
-	{
-		key: "peach",
-		name: "خوخ",
-		codes: [],
-		aliases: ["خوخ", "peach"],
-		brix: 10,
-		phMin: 3.2,
-		phMax: 4.1,
-		iodine: false
-	},
-	{
-		key: "chilli",
-		name: "فلفل حار",
-		codes: ["300005"],
-		aliases: [
-			"فلفل",
-			"chilli",
-			"chili"
-		],
-		brix: 8,
-		phMin: 4.2,
-		phMax: 5.2,
-		iodine: false
-	},
-	{
-		key: "strawberry",
-		name: "فراولة",
-		codes: ["300001", "300002"],
-		aliases: [
-			"فراولة",
-			"فراوله",
-			"strawberry",
-			"strawberyy"
-		],
-		brix: 7.5,
-		phMin: 3,
-		phMax: 4,
-		iodine: false
-	}
-];
-function fruitChemicalLimit(ticket) {
-	const direct = chemicalLimits.find((l) => l.codes.includes(String(ticket?.fruitCode)));
-	if (direct) return direct;
-	const name = String(ticket?.fruit || "").trim().toLowerCase();
-	const matches = chemicalLimits.filter((l) => l.aliases.some((a) => name === a || name.startsWith(a + " ")));
-	return matches.length === 1 ? matches[0] : null;
+//#region lib/access.ts
+var roles = {
+	admin: "مدير النظام",
+	security: "الاستقبال والأمن",
+	quality: "الجودة",
+	scale: "الميزان",
+	production: "مشرف الإنتاج",
+	warehouse: "المخازن — صلاحية عامة",
+	planner: "تخطيط الإنتاج",
+	store_main: "أمين المخزن الرئيسي",
+	store_production: "أمين مخزن الإنتاج",
+	store_finished: "أمين مخزن المنتج التام",
+	plant_manager: "مدير المصنع",
+	maintenance: "الصيانة",
+	cost_control: "مراقبة التكاليف",
+	viewer: "متابعة وتقارير"
+};
+var actualRole = (u) => u.actualRole || u.role;
+function warehouseAllowed(role, code) {
+	return !role.startsWith("store_") || role === "store_production" && code === "PROD" || role === "store_finished" && code === "FG" || role === "store_main" && !["PROD", "FG"].includes(code);
 }
-function chemicalSummary(b, ticket) {
-	const limit = fruitChemicalLimit(ticket), reasons = [];
-	const has = (k) => b[k] != null && String(b[k]).trim() !== "" && Number.isFinite(Number(b[k]));
-	if (limit) {
-		if (has("brix") && Number(b.brix) < limit.brix) reasons.push("Brix أقل من الحد المسموح للصنف");
-		if (has("ph") && (limit.phMin !== null && Number(b.ph) < limit.phMin || Number(b.ph) > limit.phMax)) reasons.push("pH خارج حدود الصنف");
-		if (limit.iodine && b.iodine === "FAIL") reasons.push("Iodine غير مطابق");
+function operator(u, action) {
+	const role = actualRole(u);
+	let mapped = role;
+	const planner = [
+		"production_create",
+		"production_requirement",
+		"production_bom"
+	];
+	const factory = [
+		"production_close",
+		"production_change_decide",
+		"production_balance_decide"
+	];
+	if (role === "planner") {
+		if (!planner.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية التخطيط");
+		mapped = "production";
+	}
+	if (role === "plant_manager") {
+		if (!factory.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة تحتاج مسؤول القسم المختص");
+		mapped = "admin";
+	}
+	if (role.startsWith("store_")) {
+		mapped = ["inventory_accept", "inventory_transfer_accept"].includes(action) && role === "store_production" ? "production" : "warehouse";
+		if (role === "store_main" && [
+			"inventory_issue",
+			"inventory_prepare_bom",
+			"inventory_return",
+			"inventory_accept",
+			"inventory_reserve"
+		].includes(action)) throw Error("الصرف على الأمر من مسؤولية مخزن الإنتاج");
+		if (role === "store_finished" && ![
+			"cycle_receive",
+			"cycle_deliver",
+			"cycle_customer",
+			"cycle_container_return",
+			"inventory_labels",
+			"inventory_label_link",
+			"inventory_transfer",
+			"inventory_transfer_accept",
+			"inventory_transfer_cancel"
+		].includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية مخزن المنتج التام");
 	}
 	return {
-		limit,
-		reasons,
-		complete: Boolean(limit && has("brix") && has("ph") && (!limit.iodine || ["PASS", "FAIL"].includes(b.iodine)))
+		...u,
+		actualRole: role,
+		role: mapped
 	};
+}
+function assertWarehouse(u, code) {
+	if (!warehouseAllowed(actualRole(u), code)) throw Error("المخزن خارج نطاق صلاحيتك");
+}
+function assertApprover(u, createdBy, demo) {
+	if (!["admin", "plant_manager"].includes(actualRole(u))) throw Error("الاعتماد من صلاحية مدير المصنع");
+	if (!demo && u.email === createdBy) throw Error("منشئ الطلب لا يعتمد طلبه في سجل التشغيل");
 }
 //#endregion
-//#region lib/agricultural-quality.ts
-var truckChecks = [
-	["pests", "وجود آفات"],
-	["foreignMatter", "مواد غريبة"],
-	["chemicals", "مواد كيميائية"],
-	["rust", "صدأ"],
-	["leakage", "تسييل"]
-];
-var fruitChecks = [
-	["mould", "فطر وعفن"],
-	["insects", "إصابات حشرية"],
-	["blackScorch", "لفح سوداء"],
-	["unripe", "غير ناضج"],
-	["yellow", "أصفر"],
-	["broken", "مكسور"],
-	["small", "أحجام صغيرة"],
-	["branches", "أغصان وأوراق"]
-];
-function inspectionSummary(b, ticket = {}) {
-	const value = (k) => Number(b["fruit_" + k]) || 0, round = (v) => Math.round(v * 1e3) / 1e3;
-	const complete = truckChecks.every(([k]) => ["PASS", "FAIL"].includes(b["truck_" + k])) && fruitChecks.every(([k]) => b["fruit_" + k] !== "" && b["fruit_" + k] != null && Number.isFinite(Number(b["fruit_" + k])) && Number(b["fruit_" + k]) >= 0 && Number(b["fruit_" + k]) <= 100);
-	const total = round(fruitChecks.reduce((n, [k]) => n + value(k), 0)), groupTotal = round(value("yellow") + value("small") + value("branches"));
-	const failed = truckChecks.filter(([k]) => b["truck_" + k] === "FAIL").map(([k]) => k), reasons = [], manualReasons = [];
-	if (failed.length) reasons.push("يوجد بند غير مطابق في فحص السيارة.");
-	if (value("insects") > 0) reasons.push("وجود إصابة حشرية يستدعي الرفض");
-	if (value("mould") > 0) reasons.push("وجود إصابة فطرية يستدعي الرفض");
-	if (value("blackScorch") > 0) reasons.push("وجود لطعة سوداء يستدعي الرفض");
-	if (value("unripe") > 5) reasons.push("غير الناضج أكثر من 5%");
-	if (value("broken") > 5) reasons.push("المكسور أو المهروس أكثر من 5%");
-	if (groupTotal > 15) reasons.push("مجموعة الأصفر والصغير والأغصان أكثر من 15%");
-	if (total > 10) reasons.push("مجموع عيوب الثمار أكثر من 10%");
-	const chemical = chemicalSummary(b, ticket);
-	reasons.push(...chemical.reasons);
-	const groupDeduction = groupTotal <= 5 ? 0 : {
-		"6": 3,
-		"8": 4,
-		"10": 6,
-		"12": 8,
-		"14": 10
-	}[String(groupTotal)] ?? null;
-	if (groupDeduction === null && groupTotal <= 15) manualReasons.push("نسبة المجموعة غير محددة بجدول الخصم؛ تحددها الجودة");
-	if (value("unripe") === 5 || value("broken") === 5) manualReasons.push("حد 5% لغير الناضج أو المكسور يحتاج اعتماد نسبة الخصم يدويًا");
-	return {
-		chemical,
-		complete,
-		total,
-		groupTotal,
-		groupDeduction,
-		failed,
-		reasons,
-		manualReasons,
-		calculatedDeduction: !complete || reasons.length || manualReasons.length ? null : round(value("unripe") + value("broken") + (groupDeduction || 0)),
-		recommendation: reasons.length ? "R" : !complete ? "PENDING" : manualReasons.length ? "REVIEW" : "A"
-	};
+//#region lib/equipment.ts
+var technicalStates = {
+	ready: "جاهزة",
+	running: "تعمل",
+	down: "متوقفة",
+	maintenance: "تحت الصيانة"
+};
+var equipmentDecisions = {
+	A: "معتمدة للتشغيل",
+	H: "بانتظار فحص الجودة",
+	R: "موقوفة بواسطة الجودة",
+	none: "لم يسجل فحص للمعدة"
+};
+function equipmentRows(inv, orders = inv.orders || []) {
+	const c = inv.state.control || {}, machines = c.machines || [], checks = c.equipmentChecks || [], reviews = c.equipmentReviews || [];
+	return machines.map((m) => {
+		const lineId = m.kind === "line" ? m.id : m.lineId, line = machines.find((x) => x.id === lineId), incidents = (c.incidents || []).filter((x) => x.machineId === m.id), active = incidents.filter((x) => !x.closedAt), check = [...checks].reverse().find((x) => x.machineId === m.id), review = [...reviews].reverse().find((x) => x.machineId === m.id), cip = [...c.cip || []].reverse().find((x) => x.lineId === lineId), running = orders.filter((o) => o.status === "open" && o.data.lineId === lineId && o.data.shifts?.some((s) => !s.closedAt));
+		return {
+			...m,
+			lineId,
+			lineName: line?.name || "",
+			technical: m.status || "ready",
+			quality: m.qualityHold ? m.qualityStatus || "H" : review?.decision || "none",
+			hold: Boolean(m.qualityHold),
+			active,
+			check,
+			review,
+			cip,
+			running,
+			lastRepair: [...incidents].reverse().find((x) => x.closedAt)
+		};
+	});
 }
-function validateAgriculturalInspection(b, now, ticket = {}) {
-	const text = (v, label) => {
-		if (typeof v !== "string" || !v.trim() || v.trim().length > 160) throw Error("أدخل " + label + " بشكل صحيح");
-		return v.trim();
-	};
-	const number = (v, label, max) => {
-		const n = Number(v);
-		if (v == null || String(v).trim() === "" || !Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("قيمة غير صالحة: " + label);
-		return n;
-	};
-	const summary = inspectionSummary(b, ticket), reject = b.decision === "R";
-	if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
-	if (b.confirm !== true) throw Error("أكد قرار الجودة");
-	if (!reject && summary.reasons.length) throw Error("الشحنة غير مطابقة؛ لا يمكن قبولها ويجب تأكيد الرفض");
-	const truck = {}, fruit = {};
-	for (const [k, label] of truckChecks) {
-		const v = b["truck_" + k];
-		if (reject && (v == null || v === "")) {
-			truck[k] = null;
-			continue;
-		}
-		if (!["PASS", "FAIL"].includes(v)) throw Error("استكمل فحص السيارة: " + label);
-		truck[k] = v;
+function lineBlockers(inv, lineId) {
+	const rows = equipmentRows(inv), line = rows.find((m) => m.id === lineId && m.kind === "line");
+	if (!line) return ["حدد خط الإنتاج"];
+	const messages = [];
+	for (const m of rows.filter((m) => m.id === lineId || m.lineId === lineId)) {
+		if (!["ready", "running"].includes(m.technical) || m.active.length) messages.push(m.name + " · " + (technicalStates[m.technical] || "متوقفة"));
+		if (m.hold) messages.push(m.name + " · " + equipmentDecisions[m.quality]);
 	}
-	for (const [k, label] of fruitChecks) {
-		const v = b["fruit_" + k];
-		fruit[k] = reject && (v == null || v === "") ? null : number(v, label, 100);
-	}
-	if (summary.total > 100) throw Error("مجموع نسب الثمار المعيبة لا يمكن أن يتجاوز 100%");
-	if (!reject && !summary.chemical.limit) throw Error("لا توجد مواصفة كيميائية لهذا الصنف؛ راجع تعريف الصنف قبل القبول");
-	if (!reject && ![
-		"A",
-		"B",
-		"C"
-	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
-	if (b.inspectionShift && ![
-		"A",
-		"B",
-		"C"
-	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
-	const finalDeduction = reject ? null : number(b.deduction, "نسبة الخصم النهائية", 100);
-	const changed = !reject && (summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction);
-	const reason = reject || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
-	const optionalText = (k, label) => reject ? b[k] ? text(b[k], label) : null : text(b[k], label);
-	const optionalNumber = (k, max) => reject && (b[k] == null || b[k] === "") ? null : number(b[k], k, max);
-	let iodine = null;
-	if (b.iodine != null && b.iodine !== "") {
-		if (!["PASS", "FAIL"].includes(b.iodine)) throw Error("اختر مطابق أو غير مطابق لليود");
-		iodine = b.iodine;
-	}
-	if (!reject && summary.chemical.limit?.iodine && !iodine) throw Error("استكمل فحص اليود للطماطم");
-	return {
-		schemaVersion: 3,
-		source: "بيان نسب الخصم + مواصفات الاستلام 2026-10-18",
-		policyVersion: "receiving-v3",
-		threshold: 10,
-		chemicalLimits: summary.chemical.limit,
-		chemicalComplete: summary.chemical.complete,
-		groupBasis: "yellow+small+branches",
-		groupTotal: summary.groupTotal,
-		groupDeduction: summary.groupDeduction,
-		rejectionReasons: summary.reasons,
-		manualReasons: summary.manualReasons,
-		truck,
-		fruit,
-		totalDefects: summary.total,
-		calculatedDeduction: summary.calculatedDeduction,
-		finalDeduction,
-		recommendation: summary.recommendation,
-		failedChecks: summary.failed,
-		decision: b.decision,
-		override: false,
-		reason,
-		shift: b.inspectionShift || null,
-		allocationNo: optionalText("allocationNo", "رقم التخصيص"),
-		lotNo: optionalText("lotNo", "رقم اللوت"),
-		brix: optionalNumber("brix", 100),
-		ph: optionalNumber("ph", 14),
-		iodine,
-		qcHead: optionalText("qcHead", "اسم رئيس الجودة"),
-		approvedAt: now,
-		earlyRejection: reject && (!summary.complete || !summary.chemical.complete)
-	};
+	if (line.cip && line.cip.decision !== "A") messages.push(line.name + " · " + (line.cip.decision === "R" ? "CIP مرفوض" : "CIP بانتظار الجودة"));
+	return [...new Set(messages)];
+}
+//#endregion
+//#region lib/operations-state.ts
+function controls(d) {
+	d.control ||= {};
+	for (const key of [
+		"releases",
+		"requests",
+		"machines",
+		"incidents",
+		"cip",
+		"costCentres",
+		"trace",
+		"closedDays",
+		"audit",
+		"userScopes",
+		"equipmentChecks",
+		"equipmentReviews"
+	]) d.control[key] ||= [];
+	return d.control;
+}
+var isReleased = (inv, o) => o.data.cycleVersion < 4 || !o.data.cycleVersion || controls(inv.state).releases.some((r) => r.orderId === o.id && r.decision === "A");
+function assertReleased(inv, o) {
+	if (!isReleased(inv, o)) throw Error("اعتمد إطلاق الأمر من شاشة الاعتمادات قبل التشغيل");
+}
+var dateInCairo = (v) => new Intl.DateTimeFormat("en-CA", {
+	timeZone: "Africa/Cairo",
+	year: "numeric",
+	month: "2-digit",
+	day: "2-digit"
+}).format(new Date(v));
+var closedDay = (inv, day) => controls(inv.state).closedDays.some((d) => d.day === day && !d.reopenedAt);
+function assertDayOpen(inv, day) {
+	if (closedDay(inv, day)) throw Error("يوم التشغيل مغلق؛ اطلب إعادة فتحه من مدير المصنع");
+}
+function expired(l, day) {
+	return Boolean(l.expiryDate && l.expiryDate < day);
+}
+function assertUsable(l, day) {
+	if (expired(l, day)) throw Error("انتهت صلاحية الباتش ولا يسمح بصرفه أو تحويله");
+}
+function assertLineReady(inv, o) {
+	if (o.data.cycleVersion < 4 && !o.data.lineId) return;
+	const reasons = lineBlockers(inv, o.data.lineId);
+	if (reasons.length) throw Error("خط الإنتاج غير جاهز: " + reasons.join(" / "));
+}
+function canControl(role, kind) {
+	if (role === "admin") return true;
+	return ({
+		plan: ["planner", "production"],
+		approve: ["plant_manager"],
+		adjust: [
+			"warehouse",
+			"store_main",
+			"store_production",
+			"store_finished",
+			"production"
+		],
+		maintain: ["maintenance", "plant_manager"],
+		equipment: [
+			"production",
+			"maintenance",
+			"plant_manager"
+		],
+		reportEquipment: [
+			"production",
+			"quality",
+			"maintenance",
+			"plant_manager"
+		],
+		cip: ["production", "maintenance"],
+		quality: ["quality"],
+		trace: ["production"],
+		day: ["plant_manager"]
+	}[kind] || []).includes(role);
+}
+function assertScope(inv, u, scope) {
+	if (actualRole(u) === "admin") return;
+	const r = controls(inv.state).userScopes.find((r) => r.email === u.email.toLowerCase());
+	if (!r) return;
+	if (scope.lineId && r.lines?.length && !r.lines.includes(scope.lineId) || scope.warehouse && r.warehouses?.length && !r.warehouses.includes(scope.warehouse)) throw Error("الخط أو المخزن خارج نطاق المستخدم");
 }
 //#endregion
 //#region lib/material-inspection.ts
@@ -12431,14 +12386,43 @@ function newInventoryAction(inv, u, b, now, id) {
 	const d = productionState(inv.state), op = b.action;
 	if (op === "inventory_transfer") {
 		const l = inv.lots.find((l) => l.id === b.lotId), amount = quantity(b.quantity);
-		if (!l || l.quality !== "A" || l.warehousePending || amount > l.available) throw Error("الرصيد المعتمد لا يكفي للتحويل");
+		if (l) {
+			assertWarehouse(u, l.warehouse);
+			assertScope(inv, u, { warehouse: l.warehouse });
+			assertUsable(l, today());
+		}
+		const allocationOrderId = Number(b.allocationOrderId) || null;
+		if (allocationOrderId) {
+			const o = inv.orders.find((o) => o.id === allocationOrderId && o.status === "open");
+			if (!o) throw Error("أمر الحجز غير متاح");
+			assertScope(inv, u, { lineId: o.data.lineId });
+		}
+		const own = d.reservations.filter((r) => r.orderId === allocationOrderId && r.lotId === l?.id && r.remaining > 0);
+		const ownQty = own.reduce((n, r) => n + r.remaining, 0);
+		if (!l || l.quality !== "A" || l.warehousePending || amount > l.available + ownQty) throw Error("الرصيد المعتمد لا يكفي للتحويل");
 		if (l.unit === "PC" && !Number.isInteger(amount)) throw Error("عدد القطع يجب أن يكون صحيحًا");
 		if (!inv.warehouses.some((w) => w.code === b.toWarehouse) || l.warehouse === b.toWarehouse || l.warehouse !== "PROD" && b.toWarehouse !== "PROD") throw Error("اختر تحويلًا من أو إلى مخزن الإنتاج");
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(b.day) || !Number.isFinite(Date.parse(b.day)) || new Date(b.day).toISOString().slice(0, 10) !== b.day || b.day > today()) throw Error("تاريخ التحويل غير صحيح أو مستقبلي");
+		const allocations = [];
+		let left = amount;
+		for (const r of own) {
+			const n = Math.min(left, r.remaining);
+			if (n > 0) {
+				r.remaining = round$2(r.remaining - n);
+				left = round$2(left - n);
+				allocations.push({
+					orderId: r.orderId,
+					code: l.code,
+					quantity: n,
+					reservationId: r.id
+				});
+			}
+		}
 		const { id: unused, warehouse, quantity: q, balance, available, reserved, prepared, ...material } = l;
 		d.transfers.push({
 			id,
 			number: "TR-" + String(d.transfers.length + 1).padStart(7, "0"),
+			allocations,
 			sourceLotId: l.id,
 			originLotId: l.originLotId || l.id,
 			material,
@@ -12460,6 +12444,10 @@ function newInventoryAction(inv, u, b, now, id) {
 		const t = d.transfers.find((t) => t.id === b.transferId && !t.receivedAt && !t.cancelledAt);
 		if (!t) throw Error("التحويل غير متاح أو تم اعتماده");
 		if (op === "inventory_transfer_cancel") {
+			for (const a of t.allocations || []) {
+				const r = d.reservations.find((r) => r.id === a.reservationId);
+				if (r) r.remaining = round$2(r.remaining + a.quantity);
+			}
 			t.cancelledAt = now;
 			t.cancelledBy = u.email;
 			t.cancelReason = text$1(b.reason);
@@ -12468,8 +12456,21 @@ function newInventoryAction(inv, u, b, now, id) {
 		if (u.role !== "admin" && (t.toWarehouse === "PROD" ? u.role !== "production" : u.role !== "warehouse")) throw Error("تأكيد التحويل من صلاحية مستلم المخزن");
 		const l = inv.lots.find((l) => l.id === t.sourceLotId);
 		if (!l || l.quality !== "A" || l.warehousePending || l.balance < t.quantity) throw Error("المادة لم تعد متاحة للتحويل");
+		assertWarehouse(u, t.toWarehouse);
+		assertScope(inv, u, { warehouse: t.toWarehouse });
 		t.receivedAt = now;
 		t.receivedBy = u.email;
+		for (const a of t.allocations || []) d.reservations.push({
+			id: "RES-" + crypto.randomUUID(),
+			orderId: a.orderId,
+			lotId: "TR-" + t.id,
+			code: t.code,
+			quantity: a.quantity,
+			remaining: a.quantity,
+			at: now,
+			by: u.email,
+			approval: true
+		});
 		return "اعتماد استلام تحويل مخزن الإنتاج";
 	}
 	if (op === "inventory_label_link") {
@@ -12553,8 +12554,8 @@ function wipRows(inv, orderId) {
 	}
 	return d.issues.filter((i) => i.acceptedAt && (!orderId || i.orderId === orderId)).map((i) => {
 		const returned = d.returns.filter((r) => r.issueId === i.id).reduce((s, r) => s + r.quantity, 0);
-		const used = d.consumptions.filter((c) => c.issueId === i.id).reduce((s, c) => s + c.quantity, 0);
-		const packed = d.packs.filter((p) => p.issueId === i.id).reduce((s, p) => s + p.quantity, 0);
+		const used = d.consumptions.filter((c) => c.issueId === i.id && !c.reversedAt).reduce((s, c) => s + c.quantity, 0);
+		const packed = d.packs.filter((p) => p.issueId === i.id && !p.reversedAt).reduce((s, p) => s + p.quantity, 0);
 		const key = i.orderId + "|" + i.code, loss = Math.min(Math.max(0, i.quantity - returned - used - packed), waste.get(key) || 0);
 		waste.set(key, (waste.get(key) || 0) - loss);
 		const pendingReturn = d.returnRequests.filter((r) => r.issueId === i.id && !r.acceptedAt && !r.cancelledAt).reduce((s, r) => s + r.quantity, 0);
@@ -12613,8 +12614,40 @@ function cycleLots(state, lots) {
 	}
 }
 //#endregion
+//#region lib/packing-plan.ts
+function packingPlan(code, target, materials, policy = "partial") {
+	const plan = bomPlan(code, target, materials);
+	if (!plan) return null;
+	const drum = plan.inputs.find((r) => ["200000", "200010"].includes(r.code));
+	if (!drum) return plan;
+	const recipe = masterData.boms.find((b) => b.code === code);
+	const sourceDrum = recipe.lines.filter((l) => l.code === drum.code && l.quantity > 0).reduce((n, l) => n + l.quantity, 0);
+	const nominal = recipe.base / sourceDrum, count = Math.ceil(target / nominal - 1e-9), whole = Math.floor(target / nominal + 1e-9), partial = Math.round((target - whole * nominal) * 1e3) / 1e3;
+	if (policy === "full" && partial > 0) throw Error("العبوات الكاملة تتطلب كمية من مضاعفات الوزن الاسمي");
+	const factor = count / drum.quantity;
+	for (const r of plan.inputs) {
+		r.theoreticalQuantity = r.quantity;
+		if (materials.find((m) => m.code === r.code)?.category === "packaging") {
+			const source = recipe.lines.filter((l) => l.code === r.code && l.quantity > 0 && !l.coproduct).reduce((n, l) => n + l.quantity, 0);
+			const n = source ? source * count / sourceDrum : r.quantity * factor;
+			r.quantity = r.unit === "PC" ? Math.ceil(n - 1e-9) : Math.round(n * 1e3) / 1e3;
+			r.bomQuantity = r.quantity;
+		}
+	}
+	return {
+		...plan,
+		packing: {
+			policy,
+			nominalWeight: Math.round(nominal * 1e3) / 1e3,
+			count,
+			whole,
+			partial
+		}
+	};
+}
+//#endregion
 //#region lib/production.ts
-var day = (v) => {
+var day$1 = (v) => {
 	const s = required(v, "التاريخ");
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(Date.parse(s)) || new Date(s).toISOString().slice(0, 10) !== s) throw Error("تاريخ غير صحيح");
 	return s;
@@ -12631,7 +12664,12 @@ var decodeOrder = (r) => {
 	};
 };
 async function productionOperation(db, u, b) {
+	u = operator(u, b.action);
 	const now = (/* @__PURE__ */ new Date()).toISOString(), op = b.action, permissions = {
+		production_balance: ["production"],
+		production_balance_decide: ["admin"],
+		production_handover_accept: ["production"],
+		production_change_decide: ["admin"],
 		production_weigh: ["production"],
 		production_create: ["production"],
 		production_bom: ["production"],
@@ -12645,20 +12683,26 @@ async function productionOperation(db, u, b) {
 	};
 	if (!permissions[op] || u.role !== "admin" && !permissions[op].includes(u.role)) throw Error("لا توجد صلاحية لهذا الإجراء؛ صرف المواد أصبح من حركات المخازن");
 	if (op === "production_create") {
-		const from = day(b.from), type = b.type || "Bulk", to = type === "Filling" ? from : new Date(Date.parse(from) + 6 * 864e5).toISOString().slice(0, 10);
+		const from = day$1(b.from), type = b.type || "Bulk", to = type === "Filling" ? from : new Date(Date.parse(from) + 6 * 864e5).toISOString().slice(0, 10);
 		if (!["Bulk", "Filling"].includes(type)) throw Error("اختر نوع الأمر");
 		const inv = await inventorySnapshot(db, b.demo === true ? 1 : 0), m = inv.materials.find((m) => m.code === b.code);
 		if (!m || m.category !== (type === "Bulk" ? "semi" : "finished")) throw Error("أضف المنتج في دليل المواد ثم اختر نصف مصنع للـBulk أو منتج تام للـFilling");
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر مخزن الناتج");
-		const plan = bomPlan(m.code, qty(b.target), inv.materials);
+		const plan = packingPlan(m.code, qty(b.target), inv.materials, b.packingPolicy || "partial");
+		const control = controls(inv.state), lineId = b.lineId || (b.demo === true ? control.machines.find((m) => m.kind === "line")?.id : null);
+		if (!control.machines.some((m) => m.id === lineId && m.kind === "line")) throw Error("حدد خط الإنتاج من شاشة الصيانة والمعدات");
 		let source = null;
 		if (type === "Filling") {
 			source = bulkLots(inv, m.code).find((l) => l.id === b.sourceLotId);
 			if (!source) throw Error("اختر باتش بلك معتمد اللون والجودة لهذا المنتج");
 			if (qty(b.target) > source.available) throw Error("مستهدف التعبئة أكبر من المتاح في باتش البلك");
 		}
+		assertScope(inv, u, { lineId });
 		const data = {
-			cycleVersion: 3,
+			cycleVersion: 4,
+			lineId,
+			costCentre: control.machines.find((m) => m.id === lineId)?.costCentre || "",
+			packingPolicy: b.packingPolicy || "partial",
 			processType: type === "Bulk" ? "PI01" : "PI02",
 			sourceLotId: source?.id || null,
 			sourceOriginLotId: source ? source.originLotId || source.id : null,
@@ -12727,17 +12771,31 @@ async function productionOperation(db, u, b) {
 	if (!raw || raw.version !== b.version || raw.status !== "open") throw Error("الأمر مغلق أو تغير؛ حدّث الصفحة");
 	const order = decodeOrder(raw), d = order.data, inv = await inventorySnapshot(db, raw.demo);
 	let action = "", status = "open";
+	assertScope(inv, u, { lineId: d.lineId });
+	assertDayOpen(inv, b.day || dateInCairo(now));
+	if (![
+		"production_requirement",
+		"production_bom",
+		"production_change_decide"
+	].includes(op)) assertReleased(inv, order);
+	if (["production_shift", "production_confirm"].includes(op)) assertLineReady(inv, order);
 	const openShift = () => {
 		const s = d.shifts.find((s) => s.id === b.shiftId);
 		if (!s || s.closedAt) throw Error("اختر شفتًا مفتوحًا");
 		return s;
 	};
+	const balanceTotals = () => ({
+		input: round(inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
+		main: round(d.confirmations.filter((c) => c.kind === "main" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
+		byproducts: round(d.confirmations.filter((c) => c.kind === "byproduct" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0))
+	});
 	const netIssue = (i) => round(i.quantity - inv.state.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0));
 	const issues = inv.state.issues.filter((i) => i.orderId === raw.id);
 	if (op === "production_bom") {
 		if (d.bom?.revision === masterData.revision) throw Error("الأمر يستخدم أحدث وصفة بالفعل");
 		const previousBom = d.bom;
-		const plan = bomPlan(d.code, d.target, inv.materials);
+		const plan = d.cycleVersion >= 4 ? packingPlan(d.code, d.target, inv.materials, d.packingPolicy) : bomPlan(d.code, d.target, inv.materials);
+		if (d.cycleVersion >= 4 && isReleased(inv, order)) throw Error("تحديث BOM بعد الإطلاق يحتاج أمرًا جديدًا أو مراجعة الاحتياجات المعتمدة");
 		if (!plan) throw Error("لا توجد وصفة لهذا المنتج في الملف");
 		if (previousBom) {
 			d.bomHistory = [...d.bomHistory || [], previousBom];
@@ -12773,13 +12831,51 @@ async function productionOperation(db, u, b) {
 			by: u.email,
 			at: now
 		};
-		const index = d.requirements.findIndex((r) => r.code === m.code);
-		if (index >= 0) d.requirements[index] = item;
-		else d.requirements.push(item);
-		action = "تحديد احتياج " + m.code;
+		if (d.cycleVersion >= 4 && isReleased(inv, order)) {
+			d.requirementChanges ||= [];
+			d.requirementChanges.push({
+				id: "CH-" + (d.requirementChanges.length + 1),
+				item,
+				status: "pending",
+				by: u.email,
+				at: now
+			});
+			action = "طلب تعديل احتياج بعد الإطلاق";
+		} else {
+			const index = d.requirements.findIndex((r) => r.code === m.code);
+			if (index >= 0) d.requirements[index] = item;
+			else d.requirements.push(item);
+			action = "تحديد احتياج " + m.code;
+		}
+	}
+	if (op === "production_change_decide") {
+		const r = (d.requirementChanges || []).find((r) => r.id === b.changeId && r.status === "pending");
+		if (!r) throw Error("طلب التعديل غير متاح");
+		assertApprover(u, r.by, raw.demo);
+		if (!["A", "R"].includes(b.decision)) throw Error("اختر قرار الاعتماد");
+		if (b.decision === "A") {
+			const i = d.requirements.findIndex((n) => n.code === r.item.code);
+			if (i >= 0) d.requirements[i] = {
+				...r.item,
+				approvedBy: u.email,
+				approvedAt: now
+			};
+			else d.requirements.push({
+				...r.item,
+				approvedBy: u.email,
+				approvedAt: now
+			});
+		}
+		Object.assign(r, {
+			status: b.decision === "A" ? "approved" : "rejected",
+			decisionBy: u.email,
+			decisionAt: now,
+			reason: required(b.reason, "سبب القرار")
+		});
+		action = "قرار تعديل احتياج";
 	}
 	if (op === "production_shift") {
-		const date = day(b.day), name = required(b.name, "اسم الشفت");
+		const date = day$1(b.day), name = required(b.name, "اسم الشفت");
 		if (date < d.from || date > d.to) throw Error("اليوم خارج فترة الأمر");
 		if (date > new Intl.DateTimeFormat("en-CA", {
 			timeZone: "Africa/Cairo",
@@ -12802,9 +12898,48 @@ async function productionOperation(db, u, b) {
 	}
 	if (op === "production_close_shift") {
 		const s = openShift();
+		if (d.cycleVersion >= 4) {
+			const metric = (v) => {
+				if (v == null || v === "") return null;
+				const n = Number(v);
+				if (!Number.isFinite(n) || n < 0 || n > 1e9) throw Error("قيمة مورد التشغيل غير صحيحة");
+				return n;
+			};
+			d.handovers ||= [];
+			d.handovers.push({
+				id: "HO-" + (d.handovers.length + 1),
+				shiftId: s.id,
+				day: s.day,
+				notes: required(b.notes, "ملاحظات تسليم الشفت"),
+				resources: {
+					laborHours: metric(b.laborHours),
+					machineHours: metric(b.machineHours),
+					electricity: metric(b.electricity),
+					steam: metric(b.steam),
+					water: metric(b.water)
+				},
+				remaining: wipRows(inv, raw.id).map((r) => ({
+					issueId: r.id,
+					code: r.code,
+					unit: r.unit,
+					remaining: r.remaining
+				})),
+				at: now,
+				by: u.email
+			});
+		}
 		s.closedAt = now;
 		s.closedBy = u.email;
 		action = "إغلاق الشفت " + s.name;
+	}
+	if (op === "production_handover_accept") {
+		const h = (d.handovers || []).find((h) => h.id === b.handoverId && !h.acceptedAt);
+		if (!h) throw Error("تسليم الشفت غير متاح");
+		if (!raw.demo && h.by === u.email) throw Error("استلام الشفت بواسطة مستخدم آخر");
+		h.acceptedAt = now;
+		h.acceptedBy = u.email;
+		h.acceptanceNotes = required(b.reason, "ملاحظات استلام الشفت");
+		action = "استلام تسليم الشفت";
 	}
 	if (op === "production_confirm") {
 		const s = openShift(), accepted = issues.filter((i) => i.acceptedAt && netIssue(i) > 0);
@@ -12826,13 +12961,24 @@ async function productionOperation(db, u, b) {
 			const basic = d.type === "Filling" ? "semi" : "raw";
 			const input = accepted.filter((i) => i.category === basic).reduce((n, i) => n + netIssue(i), 0), prior = d.confirmations.filter((c) => c.kind === "main").reduce((n, c) => n + c.quantity, 0);
 			if (amount + prior > input) throw Error("الناتج يتجاوز كمية الخام المستلمة للأمر");
-			if (d.type === "Filling" && d.bom) for (const r of d.bom.inputs) {
-				const required = r.quantity * (prior + amount) / d.target;
+			if (d.type === "Filling" && d.bom) for (const r of d.cycleVersion >= 4 ? packingPlan(d.code, prior + amount, inv.materials, d.packingPolicy)?.inputs || [] : d.bom.inputs) {
+				const required = d.cycleVersion >= 4 ? r.quantity : r.quantity * (prior + amount) / d.target;
 				if (accepted.filter((i) => i.code === r.code).reduce((n, i) => n + netIssue(i), 0) + 1e-4 < required) throw Error("استكمل استلام مكونات BOM للكمية المنتجة: " + r.code);
 			}
-			if (d.type === "Bulk") required(b.cipRef, "مرجع دورة CIP");
+			if (d.type === "Bulk") {
+				required(b.cipRef, "مرجع دورة CIP");
+				if (d.cycleVersion >= 4) {
+					const cip = controls(inv.state).cip.find((r) => r.id === b.cipId && r.lineId === d.lineId && r.decision === "A");
+					const line = controls(inv.state).machines.find((m) => m.id === d.lineId);
+					if (!cip || cip.end < (line?.statusAt || "") || dateInCairo(cip.end) !== s.day) throw Error("اختر دورة CIP معتمدة لنفس الخط ويوم التشغيل بعد آخر صيانة");
+				}
+			}
 		}
+		const expiryDate = b.expiryDate ? day$1(b.expiryDate) : "";
+		if (expiryDate && expiryDate < s.day) throw Error("صلاحية الناتج تسبق يوم الإنتاج");
 		d.confirmations.push({
+			expiryDate,
+			cipId: b.cipId || null,
 			cipRef: String(b.cipRef || "").slice(0, 160),
 			tank: String(b.tank || "").slice(0, 160),
 			notes: String(b.notes || "").slice(0, 160),
@@ -12877,13 +13023,44 @@ async function productionOperation(db, u, b) {
 		});
 		action = "تسجيل أوزان العبوات";
 	}
+	if (op === "production_balance") {
+		const total = balanceTotals(), metric = (v) => {
+			if (v == null || v === "") return 0;
+			const n = Number(v);
+			if (!Number.isFinite(n) || n < 0 || n > 1e9 || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("كمية موازنة التصنيع غير صحيحة");
+			return n;
+		};
+		const extraInput = metric(b.extraInput), evaporation = metric(b.evaporation), loss = metric(b.loss), remaining = metric(b.remaining);
+		if (d.processBalance) d.balanceHistory = [...d.balanceHistory || [], d.processBalance];
+		d.processBalance = {
+			...total,
+			extraInput,
+			evaporation,
+			loss,
+			remaining,
+			difference: round(total.input + extraInput - total.main - total.byproducts - evaporation - loss - remaining),
+			reference: required(b.reason, "مرجع موازنة التصنيع"),
+			at: now,
+			by: u.email
+		};
+		action = "تسجيل موازنة التصنيع";
+	}
+	if (op === "production_balance_decide") {
+		const r = d.processBalance;
+		if (!r || r.approvedAt) throw Error("موازنة التصنيع غير متاحة للاعتماد");
+		assertApprover(u, r.by, raw.demo);
+		r.approvedAt = now;
+		r.approvedBy = u.email;
+		r.approvalReason = required(b.reason, "سبب اعتماد فرق الموازنة");
+		action = "اعتماد فرق موازنة التصنيع";
+	}
 	if (op === "production_waste") {
 		const s = openShift(), m = inv.materials.find((m) => m.code === b.code);
 		if (!m || !issues.some((i) => i.code === m.code && i.acceptedAt)) throw Error("اختر مادة مصروفة ومستلمة للأمر");
 		const amount = qty(b.quantity);
 		const total = issues.filter((i) => i.code === m.code && i.acceptedAt).reduce((n, i) => n + netIssue(i), 0);
 		const previous = (d.waste || []).filter((w) => w.code === m.code).reduce((n, w) => n + w.quantity, 0);
-		const consumed = inv.state.consumptions.filter((c) => c.orderId === raw.id && c.code === m.code).reduce((n, c) => n + c.quantity, 0) + inv.state.packs.filter((c) => c.orderId === raw.id && c.code === m.code).reduce((n, c) => n + c.quantity, 0);
+		const consumed = inv.state.consumptions.filter((c) => c.orderId === raw.id && c.code === m.code && !c.reversedAt).reduce((n, c) => n + c.quantity, 0) + inv.state.packs.filter((c) => c.orderId === raw.id && c.code === m.code && !c.reversedAt).reduce((n, c) => n + c.quantity, 0);
 		const pending = inv.state.returnRequests.filter((r) => r.orderId === raw.id && r.code === m.code && !r.acceptedAt && !r.cancelledAt).reduce((n, r) => n + r.quantity, 0);
 		if (amount + previous + consumed + pending > total) throw Error("الهالك يتجاوز الكمية المصروفة");
 		d.waste = d.waste || [];
@@ -12956,6 +13133,13 @@ async function productionOperation(db, u, b) {
 		action = "جودة " + c.id + " — " + b.decision;
 	}
 	if (op === "production_close") {
+		if (d.cycleVersion >= 4) {
+			const totals = balanceTotals(), bal = d.processBalance;
+			if (d.confirmations.some((c) => c.unit === "KG") && (!bal || bal.input !== totals.input || bal.main !== totals.main || bal.byproducts !== totals.byproducts || bal.difference !== 0 && !bal.approvedAt)) throw Error("راجع موازنة التصنيع واعتمد فرقها قبل الإغلاق");
+			if (!["admin", "plant_manager"].includes(actualRole(u))) throw Error("الإغلاق النهائي من صلاحية مدير المصنع");
+			if ((d.handovers || []).some((h) => !h.acceptedAt)) throw Error("استكمل استلام تسليمات الشفتات");
+			for (const used of inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt)) if (controls(inv.state).trace.filter((t) => t.consumptionId === used.id).reduce((n, t) => n + t.quantity, 0) < used.quantity) throw Error("وزّع الاستهلاك على باتشات الناتج قبل الإغلاق");
+		}
 		if (d.cycleVersion >= 2 && wipRows(inv, raw.id).some((r) => r.remaining > 0)) throw Error("سوِّ المواد المتبقية لدى الإنتاج بالاستهلاك أو المرتجع");
 		if (inv.lots.some((l) => l.orderId === raw.id && l.warehousePending)) throw Error("استكمل استلام الناتج بالمخزن");
 		if ((inv.state.preparations || []).some((p) => p.orderId === raw.id && p.quantity > p.received + p.cancelled)) throw Error("استلم أو ألغِ التجهيزات المعلقة");
@@ -13209,6 +13393,16 @@ async function inventorySnapshot(db, demo) {
 	state.preparations = state.preparations || [];
 	normalizeCycle(state);
 	productionState(state);
+	const control = controls(state);
+	if (demo && !control.machines.length) control.machines.push({
+		id: "DEMO-LINE",
+		code: "DEMO-LINE",
+		name: "خط تجريبي",
+		kind: "line",
+		status: "ready",
+		costCentre: "",
+		by: "DEMO"
+	});
 	const [tickets, orders, cat] = await Promise.all([
 		db.all("SELECT * FROM tickets WHERE demo=?", [demo]),
 		db.all("SELECT * FROM production_orders WHERE demo=?", [demo]),
@@ -13292,6 +13486,8 @@ async function inventorySnapshot(db, demo) {
 			grade: c.grade || "",
 			allowedFinishedCodes: c.allowedFinishedCodes,
 			cipRef: c.cipRef,
+			expiryDate: c.expiryDate || "",
+			productionDate: c.day,
 			confirmationId: c.id,
 			extra1Name: c.extra1Name || "",
 			extra1Value: c.extra1Value || "",
@@ -13333,6 +13529,8 @@ async function inventorySnapshot(db, demo) {
 		day: "2-digit"
 	}).format(/* @__PURE__ */ new Date());
 	for (const l of lots) {
+		l.expired = expired(l, today);
+		if (l.expired) l.available = 0;
 		const p = state.salePrices.find((p) => p.code === l.code && p.color === l.color && p.grade === l.grade && p.from <= today && p.to >= today);
 		l.salePrice = l.quality === "A" && p ? p.price : null;
 	}
@@ -13387,6 +13585,7 @@ async function inventorySnapshot(db, demo) {
 	};
 }
 async function inventoryOperation(db, u, b) {
+	u = operator(u, b.action);
 	const op = b.action, demo = b.demo === true ? 1 : 0;
 	const admin = [
 		"inventory_price",
@@ -13425,23 +13624,40 @@ async function inventoryOperation(db, u, b) {
 	if (!Number.isInteger(b.inventoryVersion) || inv.version !== b.inventoryVersion) throw Error("الأرصدة تغيرت من جهاز آخر؛ حدّث الصفحة");
 	const d = inv.state, now = (/* @__PURE__ */ new Date()).toISOString(), id = "M-" + crypto.randomUUID();
 	let order = null;
-	if ([
+	const orderOps = [
 		...production,
 		"inventory_issue",
 		"inventory_prepare_bom",
 		"inventory_cancel_prepare",
 		"inventory_return"
-	].includes(op)) {
+	];
+	if (![
+		"inventory_labels",
+		"inventory_label_link",
+		"inventory_material",
+		"inventory_warehouse",
+		"inventory_price"
+	].includes(op)) assertDayOpen(inv, b.day || dateInCairo(now));
+	if (orderOps.includes(op)) {
 		order = inv.orders.find((o) => o.id === Number(b.orderId));
 		if (!order || order.status !== "open" || order.version !== b.orderVersion) throw Error("اختر أمرًا مفتوحًا وحدّث بياناته");
+		assertReleased(inv, order);
+		assertScope(inv, u, { lineId: order.data.lineId });
 	}
 	const lot = inv.lots.find((l) => l.id === b.lotId), material = inv.materials.find((m) => m.code === b.code);
 	const needLot = () => {
+		if (lot) {
+			assertWarehouse(u, lot.warehouse);
+			assertScope(inv, u, { warehouse: lot.warehouse });
+			assertUsable(lot, dateInCairo(now));
+		}
 		if (lot && materialBlocked(lot.code)) throw Error("كود المادة معلق لتعارض الماستر داتا");
 		if (!lot || lot.quality !== "A" || lot.warehousePending) throw Error("اختر باتش متاحًا ومعتمد الجودة");
 		return lot;
 	};
 	const needWarehouse = () => {
+		assertWarehouse(u, b.warehouse);
+		assertScope(inv, u, { warehouse: b.warehouse });
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر المخزن");
 		return b.warehouse;
 	};
@@ -13540,20 +13756,7 @@ async function inventoryOperation(db, u, b) {
 		});
 		description = "إضافة مخزون " + material.code;
 	}
-	if (op === "inventory_adjust") {
-		needLot();
-		const amount = qty(b.quantity) * (b.direction === "minus" ? -1 : 1);
-		if (!["plus", "minus"].includes(b.direction) || amount < 0 && -amount > lot.available) throw Error("التسوية تتجاوز المتاح");
-		d.adjustments.push({
-			id,
-			lotId: lot.id,
-			quantity: amount,
-			reason: required(b.reason, "سبب التسوية"),
-			at: now,
-			by: u.email
-		});
-		description = "تسوية مخزون " + lot.id;
-	}
+	if (op === "inventory_adjust") throw Error("استخدم طلب فرق الجرد واعتماد مدير المصنع");
 	if (op === "inventory_reserve") {
 		needLot();
 		assertProductionLot(order, lot);
@@ -13563,6 +13766,7 @@ async function inventoryOperation(db, u, b) {
 			id,
 			orderId: order.id,
 			lotId: lot.id,
+			code: lot.code,
 			quantity: amount,
 			remaining: amount,
 			at: now,
@@ -13580,6 +13784,12 @@ async function inventoryOperation(db, u, b) {
 	}
 	const prepare = (lotId, amount) => {
 		const l = inv.lots.find((x) => x.id === lotId);
+		if (l) {
+			assertWarehouse(u, l.warehouse);
+			assertScope(inv, u, { warehouse: l.warehouse });
+			assertUsable(l, dateInCairo(now));
+			if (order.data.cycleVersion >= 4 && l.unit === "PC" && !Number.isInteger(amount)) throw Error("القطع تصرف بأعداد صحيحة");
+		}
 		if (l) assertProductionLot(order, l);
 		if (!l || l.quality !== "A" || l.warehousePending || materialBlocked(l.code)) throw Error("اختر باتش متاحًا لمادة فعلية");
 		if (b.supplyRequestId) {
@@ -13657,9 +13867,15 @@ async function inventoryOperation(db, u, b) {
 		if (b.preparationId) {
 			const p = d.preparations.find((p) => p.id === b.preparationId && p.orderId === order.id);
 			const amount = qty(b.quantity);
+			if (p && order.data.cycleVersion >= 4 && p.unit === "PC" && !Number.isInteger(amount)) throw Error("القطع تستلم بأعداد صحيحة");
 			if (!p || amount > round(p.quantity - p.received - p.cancelled)) throw Error("الاستلام يتجاوز المتبقي أو تم تأكيده بالفعل");
 			const l = inv.lots.find((x) => x.id === p.lotId);
-			if (l) assertProductionLot(order, l);
+			if (l) {
+				assertWarehouse(u, l.warehouse);
+				assertScope(inv, u, { warehouse: l.warehouse });
+				assertUsable(l, dateInCairo(now));
+				assertProductionLot(order, l);
+			}
 			if (!l || l.quality !== "A" || l.warehousePending || amount > l.balance) throw Error("الباتش غير متاح للاستلام");
 			p.received = round(p.received + amount);
 			d.issues.push({
@@ -13743,8 +13959,786 @@ async function inventoryOperation(db, u, b) {
 	return { ok: true };
 }
 //#endregion
+//#region lib/operations-control.ts
+var day = (v) => {
+	const s = required(v, "التاريخ");
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(Date.parse(s)) || new Date(s).toISOString().slice(0, 10) !== s) throw Error("تاريخ غير صحيح");
+	return s;
+};
+var optional = (v) => String(v || "").trim().slice(0, 160);
+var stamp = (v) => {
+	const s = required(v, "وقت الحركة");
+	if (!Number.isFinite(Date.parse(s)) || Date.parse(s) > Date.now()) throw Error("وقت الحركة غير صحيح أو مستقبلي");
+	return new Date(s).toISOString();
+};
+async function controlOperation(db, u, b) {
+	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), d = inv.state, c = controls(d), role = actualRole(u), op = b.action, now = (/* @__PURE__ */ new Date()).toISOString(), id = crypto.randomUUID();
+	if (b.inventoryVersion !== inv.version) throw Error("الأرصدة أو الاعتمادات تغيرت؛ حدّث الصفحة");
+	const allowed = (kind) => {
+		if (!canControl(role, kind)) throw Error("لا توجد صلاحية لهذا الإجراء");
+	};
+	const order = (oid) => {
+		const o = inv.orders.find((o) => o.id === Number(oid));
+		if (!o) throw Error("الأمر غير موجود");
+		return o;
+	};
+	const lot = (lid) => {
+		const l = inv.lots.find((l) => l.id === lid);
+		if (!l) throw Error("الباتش غير موجود");
+		return l;
+	};
+	const base = {
+		id,
+		at: now,
+		by: u.email
+	};
+	let action = "", guardOrder = null;
+	const request = (kind, data) => {
+		const r = {
+			...base,
+			number: "AP-" + String(c.requests.length + 1).padStart(7, "0"),
+			kind,
+			status: "pending",
+			reason: required(b.reason, "سبب الطلب"),
+			...data
+		};
+		c.requests.push(r);
+		return r;
+	};
+	const allocate = (o) => {
+		for (const need of o.data.requirements) {
+			const existing = d.reservations.filter((r) => r.orderId === o.id && r.code === need.code).reduce((n, r) => n + r.remaining, 0), issued = d.issues.filter((i) => i.orderId === o.id && i.code === need.code).reduce((n, i) => n + i.quantity - d.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0), 0), prepared = d.preparations.filter((p) => p.orderId === o.id && p.code === need.code).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0);
+			let left = round(Math.max(0, need.quantity - existing - issued - prepared));
+			const options = inv.lots.filter((l) => l.code === need.code && l.quality === "A" && !l.warehousePending && !expired(l, dateInCairo(now)) && (o.data.type === "Filling" && l.category === "semi" ? (l.originLotId || l.id) === o.data.sourceOriginLotId : l.warehouse === "PROD")).sort((a, b) => String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)));
+			for (const l of options) {
+				const amount = round(Math.min(left, l.available));
+				if (amount <= 0) continue;
+				d.reservations.push({
+					id: "RES-" + crypto.randomUUID(),
+					orderId: o.id,
+					lotId: l.id,
+					code: l.code,
+					quantity: amount,
+					remaining: amount,
+					by: u.email,
+					at: now,
+					approval: true
+				});
+				l.available = round(l.available - amount);
+				left = round(left - amount);
+				if (!left) break;
+			}
+			if (left > 0 && o.data.type === "Filling" && inv.materials.find((m) => m.code === need.code)?.category === "semi") throw Error("رصيد البلك لا يكفي لحجز أمر التعبئة؛ راجع الأوامر المعتمدة");
+		}
+	};
+	if (op === "control_order_submit") {
+		allowed("plan");
+		const o = order(b.orderId);
+		if (o.status !== "open" || o.data.cycleVersion < 4 || isReleased(inv, o)) throw Error("الأمر غير متاح لطلب الإطلاق");
+		if (c.requests.some((r) => r.kind === "release" && r.orderId === o.id && r.status === "pending")) throw Error("يوجد طلب اعتماد معلق");
+		request("release", {
+			orderId: o.id,
+			orderVersion: o.version
+		});
+		guardOrder = o;
+		action = "طلب اعتماد إطلاق الأمر";
+	} else if (op === "control_allocate") {
+		allowed("plan");
+		const o = order(b.orderId);
+		if (o.status !== "open" || !isReleased(inv, o)) throw Error("اعتمد إطلاق الأمر أولًا");
+		allocate(o);
+		guardOrder = o;
+		action = "استكمال حجز احتياجات الأمر";
+	} else if (op === "control_adjust_request") {
+		allowed("adjust");
+		const l = lot(b.lotId);
+		assertWarehouse(u, l.warehouse);
+		const count = Number(b.count);
+		if (b.count == null || b.count === "" || !Number.isFinite(count) || count < 0 || count > 1e9 || l.unit === "PC" && !Number.isInteger(count) || Math.abs(count * 1e3 - Math.round(count * 1e3)) > 1e-5) throw Error("كمية الجرد غير صحيحة");
+		request("count", {
+			lotId: l.id,
+			code: l.code,
+			warehouse: l.warehouse,
+			expectedBalance: l.balance,
+			count
+		});
+		action = "طلب اعتماد فرق جرد";
+	} else if (op === "control_reverse_request") {
+		allowed("adjust");
+		if (![
+			"issue",
+			"transfer",
+			"adjustment",
+			"pack",
+			"consumption"
+		].includes(b.kind)) throw Error("اختر نوع الحركة للتصحيح");
+		request("reverse", {
+			sourceType: b.kind,
+			sourceId: required(b.sourceId, "رقم الحركة")
+		});
+		action = "طلب مستند عكسي";
+	} else if (op === "control_request_cancel") {
+		const r = c.requests.find((r) => r.id === b.requestId && r.status === "pending");
+		if (!r || u.email !== r.by && role !== "admin") throw Error("طلب الاعتماد غير متاح");
+		r.status = "cancelled";
+		r.cancelledAt = now;
+		r.cancelledBy = u.email;
+		action = "إلغاء طلب اعتماد";
+	} else if (op === "control_decide") {
+		const r = c.requests.find((r) => r.id === b.requestId && r.status === "pending");
+		if (!r) throw Error("طلب الاعتماد غير متاح");
+		assertApprover(u, r.by, demo);
+		if (!["A", "R"].includes(b.decision)) throw Error("اختر قبول أو رفض");
+		const reason = required(b.reason, "سبب قرار الاعتماد");
+		if (b.decision === "A") {
+			assertDayOpen(inv, dateInCairo(now));
+			if (r.kind === "release") {
+				const o = order(r.orderId);
+				if (o.status !== "open" || o.version !== r.orderVersion || isReleased(inv, o)) throw Error("الأمر تغير؛ أعد تقديم الطلب");
+				if (!o.data.requirements.length) throw Error("أضف احتياجات الأمر قبل الاعتماد");
+				if (!c.machines.find((m) => m.id === o.data.lineId && m.kind === "line")) throw Error("حدد خط الإنتاج قبل الاعتماد");
+				c.releases.push({
+					...base,
+					orderId: o.id,
+					decision: "A",
+					requestId: r.id,
+					orderVersion: o.version
+				});
+				allocate(o);
+				guardOrder = o;
+			} else if (r.kind === "count") {
+				const l = lot(r.lotId);
+				if (l.balance !== r.expectedBalance) throw Error("تغير الرصيد بعد الجرد؛ أعد الجرد والتقديم");
+				const delta = round(r.count - l.balance);
+				if (delta < 0 && -delta > l.available) throw Error("فرق الجرد يتعارض مع كميات محجوزة أو مستخدمة");
+				if (delta) d.adjustments.push({
+					...base,
+					lotId: l.id,
+					quantity: delta,
+					reason: r.reason,
+					approvalId: r.id,
+					number: r.number
+				});
+			} else if (r.kind === "reverse") {
+				const x = (r.sourceType === "issue" ? d.issues : r.sourceType === "transfer" ? d.transfers : r.sourceType === "adjustment" ? d.adjustments : r.sourceType === "pack" ? d.packs : d.consumptions).find((x) => x.id === r.sourceId && !x.reversedAt);
+				if (!x) throw Error("الحركة غير موجودة أو تم عكسها");
+				if (r.sourceType === "issue") {
+					const row = wipRows(inv, x.orderId).find((i) => i.id === x.id);
+					if (!row || row.pendingReturn > 0 || row.used > 0 || row.waste > 0) throw Error("توجد حركات تابعة؛ عالج الاستهلاك والهالك والمرتجعات أولًا");
+					const amount = row.remaining;
+					if (amount <= 0) throw Error("لا توجد كمية قابلة للعكس");
+					d.returns.push({
+						...base,
+						issueId: x.id,
+						orderId: x.orderId,
+						lotId: x.lotId,
+						quantity: amount,
+						reason: r.reason,
+						approvalId: r.id
+					});
+				}
+				if (r.sourceType === "transfer") {
+					const l = lot("TR-" + x.id);
+					if (!x.receivedAt || l.available < x.quantity) throw Error("التحويل مستخدم أو محجوز؛ لا يمكن عكسه");
+					d.transfers.push({
+						...base,
+						id: "REV-" + id,
+						number: "TR-" + String(d.transfers.length + 1).padStart(7, "0"),
+						sourceLotId: l.id,
+						originLotId: l.originLotId || l.id,
+						material: { ...x.material },
+						code: x.code,
+						name: x.name,
+						unit: x.unit,
+						batch: x.batch,
+						quantity: x.quantity,
+						fromWarehouse: x.toWarehouse,
+						toWarehouse: x.fromWarehouse,
+						day: dateInCairo(now),
+						reason: r.reason,
+						receivedAt: now,
+						receivedBy: u.email,
+						approvalId: r.id
+					});
+				}
+				if (r.sourceType === "adjustment") {
+					const l = lot(x.lotId);
+					if (x.quantity > 0 && l.available < x.quantity) throw Error("كمية التسوية مستخدمة أو محجوزة");
+					d.adjustments.push({
+						...base,
+						lotId: x.lotId,
+						quantity: -x.quantity,
+						reason: r.reason,
+						approvalId: r.id
+					});
+				}
+				if (r.sourceType === "pack") {
+					if (d.deliveries.some((v) => v.lotId === x.outputLotId)) throw Error("تم تسليم الناتج؛ لا يمكن عكس ربط العبوات");
+					x.reversedAt = now;
+				}
+				if (r.sourceType === "consumption") {
+					const o = order(x.orderId);
+					if (o.data.confirmations.length || c.trace.some((t) => t.consumptionId === x.id)) throw Error("الاستهلاك مرتبط بناتج؛ لا يمكن عكسه منفردًا");
+					x.reversedAt = now;
+					guardOrder = o;
+				}
+				x.reversedAt = now;
+				x.reversedBy = u.email;
+				x.reversalRequest = r.id;
+			}
+		}
+		Object.assign(r, {
+			status: b.decision === "A" ? "approved" : "rejected",
+			decision: b.decision,
+			decisionAt: now,
+			decisionBy: u.email,
+			decisionReason: reason
+		});
+		action = "قرار اعتماد " + r.number;
+	} else if (op === "control_user_scope") {
+		if (role !== "admin") throw Error("نطاق المستخدم من صلاحية مدير النظام");
+		const email = required(b.email, "البريد الإلكتروني").toLowerCase();
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Error("البريد غير صحيح");
+		if (!Array.isArray(b.lines) || !Array.isArray(b.warehouses) || b.lines.some((id) => !c.machines.some((m) => m.id === id && m.kind === "line")) || b.warehouses.some((code) => !inv.warehouses.some((w) => w.code === code))) throw Error("نطاق المستخدم غير صحيح");
+		c.userScopes = c.userScopes.filter((r) => r.email !== email);
+		c.userScopes.push({
+			...base,
+			email,
+			lines: [...new Set(b.lines)],
+			warehouses: [...new Set(b.warehouses)]
+		});
+		action = "تحديد نطاق المستخدم";
+	} else if (op === "control_centre") {
+		allowed("approve");
+		const code = required(b.code, "كود مركز التكلفة"), name = required(b.name, "اسم مركز التكلفة");
+		const old = c.costCentres.find((x) => x.code === code);
+		if (old) Object.assign(old, {
+			name,
+			updatedAt: now,
+			updatedBy: u.email
+		});
+		else c.costCentres.push({
+			...base,
+			code,
+			name
+		});
+		action = "تعريف مركز تكلفة تشغيلي";
+	} else if (op === "control_machine") {
+		allowed("maintain");
+		if (!["admin", "plant_manager"].includes(role)) throw Error("تعريف الخطوط والمعدات من صلاحية مدير المصنع");
+		const code = required(b.code, "كود المعدة"), name = required(b.name, "اسم المعدة");
+		if (!["line", "machine"].includes(b.kind)) throw Error("اختر خطًا أو معدة");
+		if (b.costCentre && !c.costCentres.some((x) => x.code === b.costCentre)) throw Error("اختر مركز التكلفة");
+		const old = c.machines.find((x) => x.code === code), lineId = b.kind === "machine" ? b.lineId || old?.lineId : null;
+		if (b.kind === "machine" && !c.machines.some((m) => m.id === lineId && m.kind === "line")) throw Error("اربط المعدة بخط الإنتاج");
+		if (old && (old.kind !== b.kind || (old.lineId || null) !== lineId && (old.qualityHold || c.incidents.some((i) => i.machineId === old.id && !i.closedAt)))) throw Error("لا يمكن تغيير ربط معدة موقوفة");
+		if (old) Object.assign(old, {
+			name,
+			lineId,
+			costCentre: b.costCentre || "",
+			updatedAt: now,
+			updatedBy: u.email
+		});
+		else c.machines.push({
+			...base,
+			code,
+			name,
+			kind: b.kind,
+			lineId,
+			costCentre: b.costCentre || "",
+			status: "ready"
+		});
+		action = "تعريف خط أو معدة";
+	} else if (op === "control_equipment_status" || op === "control_equipment_quality") {
+		allowed(op === "control_equipment_status" ? "equipment" : "quality");
+		const m = c.machines.find((m) => m.id === b.machineId);
+		if (!m) throw Error("اختر المعدة");
+		const lineId = m.kind === "line" ? m.id : m.lineId;
+		assertScope(inv, u, { lineId });
+		const value = day(b.day);
+		if (value > dateInCairo(now)) throw Error("اليوم مستقبلي");
+		assertDayOpen(inv, value);
+		const shift = required(b.shift, "الشفت"), o = b.orderId ? order(b.orderId) : null;
+		if (o && o.data.lineId !== lineId) throw Error("الأمر مرتبط بخط آخر");
+		const record = {
+			...base,
+			machineId: m.id,
+			machineName: m.name,
+			lineId,
+			day: value,
+			shift,
+			orderId: o?.id || null,
+			notes: optional(b.notes)
+		};
+		if (op === "control_equipment_status") {
+			if (![
+				"ready",
+				"running",
+				"down",
+				"maintenance"
+			].includes(b.status)) throw Error("اختر الحالة الفنية");
+			const active = c.incidents.some((r) => r.machineId === m.id && !r.closedAt);
+			if (["ready", "running"].includes(b.status) && (active || ["down", "maintenance"].includes(m.status) && ![
+				"admin",
+				"maintenance",
+				"plant_manager"
+			].includes(role))) throw Error("أغلق العطل بواسطة الصيانة قبل إعلان الجاهزية");
+			if (["down", "maintenance"].includes(b.status)) {
+				const reason = required(b.notes, "سبب التوقف");
+				if (!active) c.incidents.push({
+					...base,
+					number: "MT-" + String(c.incidents.length + 1).padStart(7, "0"),
+					machineId: m.id,
+					machineName: m.name,
+					start: now,
+					reason,
+					orderId: o?.id || null,
+					requiresQuality: b.requiresQuality !== false,
+					day: value,
+					shift
+				});
+				if (b.requiresQuality !== false) {
+					m.qualityHold = true;
+					m.qualityStatus = "H";
+					m.qualityReason = reason;
+					m.qualityHoldAt = now;
+				}
+			}
+			m.status = b.status;
+			m.updatedAt = now;
+			if (["down", "maintenance"].includes(b.status)) m.statusAt = now;
+			c.equipmentChecks.push({
+				...record,
+				number: "EC-" + String(c.equipmentChecks.length + 1).padStart(7, "0"),
+				status: b.status
+			});
+			action = "تسجيل حالة المعدة بالشفت";
+		} else {
+			if (![
+				"A",
+				"H",
+				"R"
+			].includes(b.decision)) throw Error("اختر قرار الجودة");
+			if (b.decision === "A" && (!["ready", "running"].includes(m.status) || c.incidents.some((r) => r.machineId === m.id && !r.closedAt))) throw Error("المعدة غير جاهزة فنيًا لاعتماد الجودة");
+			const reason = b.decision === "A" ? optional(b.reason) : required(b.reason, "سبب قرار الجودة");
+			const r = {
+				...record,
+				number: "EQ-" + String(c.equipmentReviews.length + 1).padStart(7, "0"),
+				decision: b.decision,
+				reason,
+				cleanliness: optional(b.cleanliness),
+				integrity: optional(b.integrity),
+				readings: optional(b.readings)
+			};
+			c.equipmentReviews.push(r);
+			m.qualityHold = b.decision !== "A";
+			m.qualityStatus = b.decision;
+			m.qualityReason = reason;
+			m.qualityAt = now;
+			m.qualityBy = u.email;
+			action = "فحص جودة وجاهزية المعدة";
+		}
+	} else if (op === "control_incident") {
+		allowed("reportEquipment");
+		const m = c.machines.find((m) => m.id === b.machineId);
+		if (!m) throw Error("اختر المعدة");
+		const lineId = m.kind === "line" ? m.id : m.lineId;
+		assertScope(inv, u, { lineId });
+		const start = stamp(b.start);
+		assertDayOpen(inv, dateInCairo(start));
+		if (c.incidents.some((i) => i.machineId === m.id && !i.closedAt)) throw Error("يوجد عطل مفتوح للمعدة");
+		const o = b.orderId ? order(b.orderId) : null;
+		if (o && o.data.lineId !== lineId) throw Error("الأمر مرتبط بخط آخر");
+		const reason = required(b.reason, "سبب التوقف");
+		c.incidents.push({
+			...base,
+			number: "MT-" + String(c.incidents.length + 1).padStart(7, "0"),
+			machineId: m.id,
+			machineName: m.name,
+			start,
+			reason,
+			orderId: o?.id || null,
+			requiresQuality: b.requiresQuality === true
+		});
+		m.status = "down";
+		m.statusAt = now;
+		if (b.requiresQuality === true) {
+			m.qualityHold = true;
+			m.qualityStatus = "H";
+			m.qualityReason = reason;
+			m.qualityHoldAt = now;
+		}
+		action = "تسجيل توقف معدة";
+	} else if (op === "control_incident_close") {
+		allowed("maintain");
+		const r = c.incidents.find((r) => r.id === b.incidentId && !r.closedAt);
+		if (!r) throw Error("العطل غير متاح");
+		const m = c.machines.find((m) => m.id === r.machineId);
+		assertScope(inv, u, { lineId: m?.kind === "line" ? m.id : m?.lineId });
+		const end = stamp(b.end);
+		assertDayOpen(inv, dateInCairo(end));
+		if (end < r.start) throw Error("نهاية التوقف تسبق البداية");
+		r.closedAt = now;
+		r.end = end;
+		r.minutes = Math.round((Date.parse(end) - Date.parse(r.start)) / 6e4);
+		r.repair = required(b.reason, "الإصلاح المنفذ");
+		r.notes = optional(b.notes);
+		r.closedBy = u.email;
+		if (m && !c.incidents.some((i) => i.machineId === m.id && !i.closedAt)) {
+			m.status = "ready";
+			m.statusAt = now;
+			if (r.requiresQuality) {
+				m.qualityHold = true;
+				m.qualityStatus = "H";
+				m.qualityReason = "بانتظار فحص الجودة بعد الإصلاح";
+				m.qualityHoldAt = now;
+			}
+		}
+		action = "إغلاق العطل وتأكيد الجاهزية الفنية";
+	} else if (op === "control_cip") {
+		allowed("cip");
+		const m = c.machines.find((m) => m.id === b.lineId && m.kind === "line");
+		if (!m) throw Error("اختر خط الإنتاج");
+		assertScope(inv, u, { lineId: m.id });
+		const start = stamp(b.start), end = stamp(b.end);
+		if (start > end) throw Error("نهاية CIP تسبق البداية");
+		assertDayOpen(inv, dateInCairo(end));
+		c.cip.push({
+			...base,
+			number: "CIP-" + String(c.cip.length + 1).padStart(7, "0"),
+			lineId: m.id,
+			lineName: m.name,
+			start,
+			end,
+			reference: required(b.reference, "مرجع إجراء CIP المعتمد"),
+			readings: required(b.readings, "القراءات والنتائج"),
+			notes: optional(b.notes)
+		});
+		action = "تسجيل تنفيذ CIP";
+	} else if (op === "control_cip_quality") {
+		allowed("quality");
+		const r = c.cip.find((r) => r.id === b.cipId && !r.decision);
+		if (!r) throw Error("فحص CIP غير متاح");
+		assertScope(inv, u, { lineId: r.lineId });
+		if (!["A", "R"].includes(b.decision)) throw Error("اختر قرار الجودة");
+		r.decision = b.decision;
+		r.qualityBy = u.email;
+		r.qualityAt = now;
+		r.reason = required(b.reason, "نتيجة مراجعة CIP");
+		action = "اعتماد فحص CIP";
+	} else if (op === "control_trace") {
+		allowed("trace");
+		const usage = d.consumptions.find((x) => x.id === b.consumptionId && !x.reversedAt);
+		if (!usage) throw Error("اختر استهلاكًا فعليًا");
+		const o = order(usage.orderId), l = lot(b.outputLotId), amount = qty(b.quantity);
+		if (l.orderId !== o.id || !l.id.startsWith("P-")) throw Error("اختر ناتجًا لنفس أمر التشغيل");
+		if (amount + c.trace.filter((t) => t.consumptionId === usage.id).reduce((n, t) => n + t.quantity, 0) > usage.quantity) throw Error("كمية التتبع تتجاوز الاستهلاك غير الموزع");
+		c.trace.push({
+			...base,
+			consumptionId: usage.id,
+			issueId: usage.issueId,
+			orderId: o.id,
+			outputLotId: l.id,
+			code: usage.code,
+			quantity: amount
+		});
+		guardOrder = o;
+		action = "ربط الاستهلاك بباتش الناتج";
+	} else if (op === "control_day_close") {
+		allowed("day");
+		const value = day(b.day);
+		if (value > dateInCairo(now) || c.closedDays.some((x) => x.day === value && !x.reopenedAt)) throw Error("اليوم مستقبلي أو مغلق بالفعل");
+		if (inv.orders.some((o) => o.data.shifts.some((s) => s.day === value && !s.closedAt))) throw Error("أغلق شفتات اليوم أولًا");
+		if (inv.lots.some((l) => l.orderId && inv.orders.find((o) => o.id === l.orderId)?.data.confirmations.some((x) => x.batch === l.batch && x.day === value) && (l.quality === "H" || l.warehousePending))) throw Error("استكمل جودة واستلام ناتج اليوم");
+		c.closedDays.push({
+			...base,
+			day: value,
+			reason: required(b.reason, "ملاحظات إغلاق اليوم")
+		});
+		action = "إغلاق يوم التشغيل";
+	} else if (op === "control_day_reopen") {
+		allowed("day");
+		const r = c.closedDays.find((r) => r.id === b.dayId && !r.reopenedAt);
+		if (!r) throw Error("اليوم ليس مغلقًا");
+		r.reopenedAt = now;
+		r.reopenedBy = u.email;
+		r.reopenReason = required(b.reason, "سبب إعادة الفتح");
+		action = "إعادة فتح يوم التشغيل";
+	} else throw Error("إجراء رقابي غير معروف");
+	c.audit.push({
+		...base,
+		action,
+		role
+	});
+	const guard = guardOrder ? " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=?)" : "", args = guardOrder ? [
+		guardOrder.id,
+		demo,
+		guardOrder.version
+	] : [];
+	if (!(inv.version === 0 ? await db.run("INSERT OR IGNORE INTO inventory(id,version,data) SELECT ?,1,? WHERE 1=1" + guard, [
+		demo,
+		JSON.stringify(d),
+		...args
+	]) : await db.run("UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=?" + guard, [
+		JSON.stringify(d),
+		demo,
+		inv.version,
+		...args
+	])).changes) throw Error("تغيرت البيانات؛ حدّث الصفحة وأعد المحاولة");
+	return { ok: true };
+}
+//#endregion
+//#region lib/chemical-limits.ts
+var chemicalLimits = [
+	{
+		key: "guava",
+		name: "جوافة",
+		codes: ["300003"],
+		aliases: [
+			"جوافة",
+			"جوافه",
+			"guava"
+		],
+		brix: 7,
+		phMin: 3.8,
+		phMax: 4.2,
+		iodine: false
+	},
+	{
+		key: "mango",
+		name: "مانجو",
+		codes: ["300004"],
+		aliases: ["مانجو", "mango"],
+		brix: 13.5,
+		phMin: 3.6,
+		phMax: 4.5,
+		iodine: false
+	},
+	{
+		key: "tomato",
+		name: "طماطم",
+		codes: ["300000"],
+		aliases: ["طماطم", "tomato"],
+		brix: 4.5,
+		phMin: null,
+		phMax: 4.5,
+		iodine: true
+	},
+	{
+		key: "apricot",
+		name: "مشمش",
+		codes: ["300006"],
+		aliases: ["مشمش", "apricot"],
+		brix: 11,
+		phMin: 3,
+		phMax: 4.5,
+		iodine: false
+	},
+	{
+		key: "peach",
+		name: "خوخ",
+		codes: [],
+		aliases: ["خوخ", "peach"],
+		brix: 10,
+		phMin: 3.2,
+		phMax: 4.1,
+		iodine: false
+	},
+	{
+		key: "chilli",
+		name: "فلفل حار",
+		codes: ["300005"],
+		aliases: [
+			"فلفل",
+			"chilli",
+			"chili"
+		],
+		brix: 8,
+		phMin: 4.2,
+		phMax: 5.2,
+		iodine: false
+	},
+	{
+		key: "strawberry",
+		name: "فراولة",
+		codes: ["300001", "300002"],
+		aliases: [
+			"فراولة",
+			"فراوله",
+			"strawberry",
+			"strawberyy"
+		],
+		brix: 7.5,
+		phMin: 3,
+		phMax: 4,
+		iodine: false
+	}
+];
+function fruitChemicalLimit(ticket) {
+	const direct = chemicalLimits.find((l) => l.codes.includes(String(ticket?.fruitCode)));
+	if (direct) return direct;
+	const name = String(ticket?.fruit || "").trim().toLowerCase();
+	const matches = chemicalLimits.filter((l) => l.aliases.some((a) => name === a || name.startsWith(a + " ")));
+	return matches.length === 1 ? matches[0] : null;
+}
+function chemicalSummary(b, ticket) {
+	const limit = fruitChemicalLimit(ticket), reasons = [];
+	const has = (k) => b[k] != null && String(b[k]).trim() !== "" && Number.isFinite(Number(b[k]));
+	if (limit) {
+		if (has("brix") && Number(b.brix) < limit.brix) reasons.push("Brix أقل من الحد المسموح للصنف");
+		if (has("ph") && (limit.phMin !== null && Number(b.ph) < limit.phMin || Number(b.ph) > limit.phMax)) reasons.push("pH خارج حدود الصنف");
+		if (limit.iodine && b.iodine === "FAIL") reasons.push("Iodine غير مطابق");
+	}
+	return {
+		limit,
+		reasons,
+		complete: Boolean(limit && has("brix") && has("ph") && (!limit.iodine || ["PASS", "FAIL"].includes(b.iodine)))
+	};
+}
+//#endregion
+//#region lib/agricultural-quality.ts
+var truckChecks = [
+	["pests", "وجود آفات"],
+	["foreignMatter", "مواد غريبة"],
+	["chemicals", "مواد كيميائية"],
+	["rust", "صدأ"],
+	["leakage", "تسييل"]
+];
+var fruitChecks = [
+	["mould", "فطر وعفن"],
+	["insects", "إصابات حشرية"],
+	["blackScorch", "لفح سوداء"],
+	["unripe", "غير ناضج"],
+	["yellow", "أصفر"],
+	["broken", "مكسور"],
+	["small", "أحجام صغيرة"],
+	["branches", "أغصان وأوراق"]
+];
+function inspectionSummary(b, ticket = {}) {
+	const value = (k) => Number(b["fruit_" + k]) || 0, round = (v) => Math.round(v * 1e3) / 1e3;
+	const complete = truckChecks.every(([k]) => ["PASS", "FAIL"].includes(b["truck_" + k])) && fruitChecks.every(([k]) => b["fruit_" + k] !== "" && b["fruit_" + k] != null && Number.isFinite(Number(b["fruit_" + k])) && Number(b["fruit_" + k]) >= 0 && Number(b["fruit_" + k]) <= 100);
+	const total = round(fruitChecks.reduce((n, [k]) => n + value(k), 0)), groupTotal = round(value("yellow") + value("small") + value("branches"));
+	const failed = truckChecks.filter(([k]) => b["truck_" + k] === "FAIL").map(([k]) => k), reasons = [], manualReasons = [];
+	if (failed.length) reasons.push("يوجد بند غير مطابق في فحص السيارة.");
+	if (value("insects") > 0) reasons.push("وجود إصابة حشرية يستدعي الرفض");
+	if (value("mould") > 0) reasons.push("وجود إصابة فطرية يستدعي الرفض");
+	if (value("blackScorch") > 0) reasons.push("وجود لطعة سوداء يستدعي الرفض");
+	if (value("unripe") > 5) reasons.push("غير الناضج أكثر من 5%");
+	if (value("broken") > 5) reasons.push("المكسور أو المهروس أكثر من 5%");
+	if (groupTotal > 15) reasons.push("مجموعة الأصفر والصغير والأغصان أكثر من 15%");
+	if (total > 10) reasons.push("مجموع عيوب الثمار أكثر من 10%");
+	const chemical = chemicalSummary(b, ticket);
+	reasons.push(...chemical.reasons);
+	const groupDeduction = groupTotal <= 5 ? 0 : {
+		"6": 3,
+		"8": 4,
+		"10": 6,
+		"12": 8,
+		"14": 10
+	}[String(groupTotal)] ?? null;
+	if (groupDeduction === null && groupTotal <= 15) manualReasons.push("نسبة المجموعة غير محددة بجدول الخصم؛ تحددها الجودة");
+	if (value("unripe") === 5 || value("broken") === 5) manualReasons.push("حد 5% لغير الناضج أو المكسور يحتاج اعتماد نسبة الخصم يدويًا");
+	return {
+		chemical,
+		complete,
+		total,
+		groupTotal,
+		groupDeduction,
+		failed,
+		reasons,
+		manualReasons,
+		calculatedDeduction: !complete || reasons.length || manualReasons.length ? null : round(value("unripe") + value("broken") + (groupDeduction || 0)),
+		recommendation: reasons.length ? "R" : !complete ? "PENDING" : manualReasons.length ? "REVIEW" : "A"
+	};
+}
+function validateAgriculturalInspection(b, now, ticket = {}) {
+	const text = (v, label) => {
+		if (typeof v !== "string" || !v.trim() || v.trim().length > 160) throw Error("أدخل " + label + " بشكل صحيح");
+		return v.trim();
+	};
+	const number = (v, label, max) => {
+		const n = Number(v);
+		if (v == null || String(v).trim() === "" || !Number.isFinite(n) || n < 0 || n > max || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("قيمة غير صالحة: " + label);
+		return n;
+	};
+	const summary = inspectionSummary(b, ticket), reject = b.decision === "R";
+	if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
+	if (b.confirm !== true) throw Error("أكد قرار الجودة");
+	if (!reject && summary.reasons.length) throw Error("الشحنة غير مطابقة؛ لا يمكن قبولها ويجب تأكيد الرفض");
+	const truck = {}, fruit = {};
+	for (const [k, label] of truckChecks) {
+		const v = b["truck_" + k];
+		if (reject && (v == null || v === "")) {
+			truck[k] = null;
+			continue;
+		}
+		if (!["PASS", "FAIL"].includes(v)) throw Error("استكمل فحص السيارة: " + label);
+		truck[k] = v;
+	}
+	for (const [k, label] of fruitChecks) {
+		const v = b["fruit_" + k];
+		fruit[k] = reject && (v == null || v === "") ? null : number(v, label, 100);
+	}
+	if (summary.total > 100) throw Error("مجموع نسب الثمار المعيبة لا يمكن أن يتجاوز 100%");
+	if (!reject && !summary.chemical.limit) throw Error("لا توجد مواصفة كيميائية لهذا الصنف؛ راجع تعريف الصنف قبل القبول");
+	if (!reject && ![
+		"A",
+		"B",
+		"C"
+	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
+	if (b.inspectionShift && ![
+		"A",
+		"B",
+		"C"
+	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
+	const finalDeduction = reject ? null : number(b.deduction, "نسبة الخصم النهائية", 100);
+	const changed = !reject && (summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction);
+	const reason = reject || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
+	const optionalText = (k, label) => reject ? b[k] ? text(b[k], label) : null : text(b[k], label);
+	const optionalNumber = (k, max) => reject && (b[k] == null || b[k] === "") ? null : number(b[k], k, max);
+	let iodine = null;
+	if (b.iodine != null && b.iodine !== "") {
+		if (!["PASS", "FAIL"].includes(b.iodine)) throw Error("اختر مطابق أو غير مطابق لليود");
+		iodine = b.iodine;
+	}
+	if (!reject && summary.chemical.limit?.iodine && !iodine) throw Error("استكمل فحص اليود للطماطم");
+	return {
+		schemaVersion: 3,
+		source: "بيان نسب الخصم + مواصفات الاستلام 2026-10-18",
+		policyVersion: "receiving-v3",
+		threshold: 10,
+		chemicalLimits: summary.chemical.limit,
+		chemicalComplete: summary.chemical.complete,
+		groupBasis: "yellow+small+branches",
+		groupTotal: summary.groupTotal,
+		groupDeduction: summary.groupDeduction,
+		rejectionReasons: summary.reasons,
+		manualReasons: summary.manualReasons,
+		truck,
+		fruit,
+		totalDefects: summary.total,
+		calculatedDeduction: summary.calculatedDeduction,
+		finalDeduction,
+		recommendation: summary.recommendation,
+		failedChecks: summary.failed,
+		decision: b.decision,
+		override: false,
+		reason,
+		shift: b.inspectionShift || null,
+		allocationNo: optionalText("allocationNo", "رقم التخصيص"),
+		lotNo: optionalText("lotNo", "رقم اللوت"),
+		brix: optionalNumber("brix", 100),
+		ph: optionalNumber("ph", 14),
+		iodine,
+		qcHead: optionalText("qcHead", "اسم رئيس الجودة"),
+		approvedAt: now,
+		earlyRejection: reject && (!summary.complete || !summary.chemical.complete)
+	};
+}
+//#endregion
 //#region lib/warehouse-cycle.ts
 async function warehouseCycle(db, u, b) {
+	u = operator(u, b.action);
 	const permissions = {
 		cycle_receive: ["warehouse"],
 		cycle_incoming_quality: ["quality"],
@@ -13766,6 +14760,11 @@ async function warehouseCycle(db, u, b) {
 	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), d = inv.state;
 	if (!Number.isInteger(b.inventoryVersion) || b.inventoryVersion !== inv.version) throw Error("الأرصدة تغيرت من جهاز آخر؛ حدّث الصفحة");
 	const now = (/* @__PURE__ */ new Date()).toISOString(), id = crypto.randomUUID();
+	if (![
+		"cycle_customer",
+		"cycle_incoming_quality",
+		"cycle_container_release"
+	].includes(op)) assertDayOpen(inv, dateInCairo(now));
 	let description = "", guardOrder = null, guardTicket = null;
 	const serial = (prefix, rows) => prefix + "-" + String(rows.length + 1).padStart(7, "0");
 	const base = {
@@ -13774,18 +14773,24 @@ async function warehouseCycle(db, u, b) {
 		by: u.email
 	};
 	const warehouse = () => {
+		assertWarehouse(u, b.warehouse);
+		assertScope(inv, u, { warehouse: b.warehouse });
 		if (!inv.warehouses.some((w) => w.code === b.warehouse)) throw Error("اختر المخزن");
 		return b.warehouse;
 	};
 	const lot = () => {
 		const l = inv.lots.find((l) => l.id === b.lotId);
 		if (!l) throw Error("الباتش غير موجود");
+		assertWarehouse(u, l.warehouse);
+		assertScope(inv, u, { warehouse: l.warehouse });
 		if (l.orderId) guardOrder = inv.orders.find((o) => o.id === l.orderId);
 		return l;
 	};
 	const order = (id) => {
 		const o = inv.orders.find((o) => o.id === Number(id));
 		if (!o || o.status !== "open" || o.version !== b.orderVersion) throw Error("اختر أمرًا مفتوحًا وحدّث بياناته");
+		assertReleased(inv, o);
+		assertScope(inv, u, { lineId: o.data.lineId });
 		guardOrder = o;
 		return o;
 	};
@@ -13980,8 +14985,10 @@ async function warehouseCycle(db, u, b) {
 	if (op === "cycle_deliver") {
 		const l = lot(), amount = qty(b.quantity), c = d.customers.find((c) => c.id === b.customerId);
 		if (!c) throw Error("اختر العميل");
+		assertUsable(l, dateInCairo(now));
+		assertWarehouse(u, l.warehouse);
 		if (l.category !== "finished" || l.quality !== "A" || l.warehousePending || amount > l.available) throw Error("المنتج غير متاح للتسليم بهذه الكمية");
-		const packs = d.packs.filter((p) => p.outputLotId === l.id);
+		const packs = d.packs.filter((p) => p.outputLotId === l.id && !p.reversedAt);
 		if (!packs.length) throw Error("سجل العبوات الفعلية على دفعة المنتج أولًا");
 		if (!Array.isArray(b.packages) || !b.packages.length || b.packages.length > 100 || new Set(b.packages.map((p) => p.packId)).size !== b.packages.length) throw Error("راجع بنود العبوات المسلمة");
 		const packages = b.packages.map((line) => {
@@ -14179,15 +15186,6 @@ async function receivingOperation(db, u, b) {
 }
 //#endregion
 //#region lib/workflow.ts
-var roles = {
-	admin: "مدير النظام",
-	security: "الاستقبال والأمن",
-	quality: "الجودة",
-	scale: "الميزان",
-	production: "الإنتاج",
-	warehouse: "المخازن",
-	viewer: "متابعة وتقارير"
-};
 var statuses = {
 	quality: "انتظار الجودة",
 	gross: "انتظار الوزن القائم",
@@ -14338,4 +15336,4 @@ function normalizePlate(value) {
 var createTicketSql = `INSERT INTO tickets (demo,version,status,data,history,created_at) SELECT ?,1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM tickets WHERE demo=? AND coalesce(json_extract(data,'$.plateKey'),${plateReplacements.reduce((sql, [a, b]) => `replace(${sql},'${a}','${b}')`, "lower(json_extract(data,'$.plate'))")})=? AND created_at>?)`;
 var duplicatePlateMessage = "السيارة مسجلة بالفعل خلال آخر 4 ساعات. افتح التذكرة الحالية لاستكمال الإجراءات، أو أعد التسجيل بعد انقضاء المدة.";
 //#endregion
-export { assignTicketOrder, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, inventoryOperation, inventorySnapshot, normalizePlate, productionOperation, receivingOperation, roles, stages, statuses, text, transition, validateCatalog, warehouseCycle };
+export { assignTicketOrder, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, inventoryOperation, inventorySnapshot, normalizePlate, productionOperation, receivingOperation, roles, stages, statuses, text, transition, validateCatalog, warehouseCycle };
