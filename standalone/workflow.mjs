@@ -216,6 +216,30 @@ function assertScope(inv, u, scope) {
 	if (scope.lineId && r.lines?.length && !r.lines.includes(scope.lineId) || scope.warehouse && r.warehouses?.length && !r.warehouses.includes(scope.warehouse)) throw Error("الخط أو المخزن خارج نطاق المستخدم");
 }
 //#endregion
+//#region lib/quality-approval.ts
+function validateQualityApproval(b) {
+	const terminal = ["A", "R"].includes(b.decision);
+	const name = String(b.inspectorName || "").trim();
+	const report = String(b.inspectionReport || "").trim();
+	if (name.length > 160 || report.length > 4e3) throw Error("نص نتيجة الفحص أو اسم القائم بالفحص طويل");
+	if (terminal) {
+		if (!name) throw Error("أدخل اسم القائم بالفحص");
+		if (!report) throw Error("أدخل نتيجة الفحص الكاملة");
+		if (!["PASS", "FAIL"].includes(b.conformity)) throw Error("حدد نتيجة المطابقة قبل اعتماد الجودة");
+		if (b.confirmQuality !== true) throw Error("أكد اكتمال نتائج الفحص وقرار الجودة");
+	}
+	return {
+		qualitySchemaVersion: 5,
+		inspectorName: name,
+		inspectionReport: report,
+		qualityConfirmed: terminal && b.confirmQuality === true
+	};
+}
+function receivingReady(data) {
+	const q = data.receivingQuality;
+	return Boolean(q && q.decision === "A" && q.allowProceed === true && q.reviewerName && q.confirmed === true);
+}
+//#endregion
 //#region lib/material-inspection.ts
 var inspectionFields = [
 	["appearance", "المظهر"],
@@ -333,6 +357,10 @@ function materialProfile(m) {
 		"300010": "ascorbic"
 	}[m?.code] || "";
 }
+function requiredInspectionFields(profile) {
+	const spec = materialSpecifications[profile] || {};
+	return inspectionFields.filter(([key]) => key in spec);
+}
 function validateMaterialInspection(b) {
 	const results = {};
 	for (const [key] of inspectionFields) {
@@ -340,7 +368,11 @@ function validateMaterialInspection(b) {
 		if (value != null && String(value).length > 160) throw Error("نتيجة الفحص طويلة");
 		results[key] = String(value || "").trim();
 	}
+	if (b.decision === "A") {
+		for (const [key, label] of requiredInspectionFields(b.qcProfile)) if (!results[key]) throw Error("استكمل نتيجة الفحص: " + label);
+	}
 	return {
+		...validateQualityApproval(b),
 		results,
 		specification: materialSpecifications[b.qcProfile] || null,
 		profile: b.qcProfile || "",
@@ -13215,6 +13247,7 @@ async function productionOperation(db, u, b) {
 			allowedFinishedCodes = [...new Set(b.allowedFinishedCodes)];
 		}
 		Object.assign(c, {
+			...validateQualityApproval(b),
 			...qualityDisposition(b),
 			allowedFinishedCodes,
 			brix: extraNum("brix", 100),
@@ -13243,7 +13276,7 @@ async function productionOperation(db, u, b) {
 			for (const used of inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt)) if (controls(inv.state).trace.filter((t) => t.consumptionId === used.id).reduce((n, t) => n + t.quantity, 0) < used.quantity) throw Error("وزّع الاستهلاك على باتشات الناتج قبل الإغلاق");
 		}
 		if (d.cycleVersion >= 2 && wipRows(inv, raw.id).some((r) => r.remaining > 0)) throw Error("سوِّ المواد المتبقية لدى الإنتاج بالاستهلاك أو المرتجع");
-		if (inv.lots.some((l) => l.orderId === raw.id && l.warehousePending)) throw Error("استكمل استلام الناتج بالمخزن");
+		if (inv.lots.some((l) => l.orderId === raw.id && l.warehousePending && l.quality !== "R")) throw Error("استكمل استلام الناتج بالمخزن");
 		if ((inv.state.preparations || []).some((p) => p.orderId === raw.id && p.quantity > p.received + p.cancelled)) throw Error("استلم أو ألغِ التجهيزات المعلقة");
 		if (!d.confirmations.length) throw Error("لا يوجد إنتاج مسجل");
 		if (d.shifts.some((s) => !s.closedAt)) throw Error("أغلق الشفتات");
@@ -13619,6 +13652,7 @@ async function inventorySnapshot(db, demo) {
 			category: m?.category || e.category,
 			unit: m?.unit || e.unit,
 			quality: e.quality || "A",
+			requiresQuality: Boolean(e.requiresQuality || e.requiresWarehouseReceipt && !state.warehouseReceipts.some((r) => r.lotId === e.id)),
 			legacy: 0,
 			source: e.kind === "opening" ? "رصيد افتتاحي" : "إضافة مخزنية"
 		});
@@ -13861,7 +13895,7 @@ async function inventoryOperation(db, u, b) {
 			batch: required(b.batch, "الباتش"),
 			quantity: qty(b.quantity),
 			requiresWarehouseReceipt: op === "inventory_add",
-			requiresQuality: op === "inventory_add" && Boolean(material.requiresQuality || material.category === "packaging" || materialProfile(material)),
+			requiresQuality: op === "inventory_add",
 			qcProfile: materialProfile(material),
 			kind: op === "inventory_opening" ? "opening" : "addition",
 			reason: required(b.reason, "مرجع الإضافة"),
@@ -14740,7 +14774,7 @@ function inspectionSummary(b, ticket = {}) {
 	if (value("unripe") > 5) reasons.push("غير الناضج أكثر من 5%");
 	if (value("broken") > 5) reasons.push("المكسور أو المهروس أكثر من 5%");
 	if (groupTotal > 15) reasons.push("مجموعة الأصفر والصغير والأغصان أكثر من 15%");
-	if (total > 10) reasons.push("مجموع عيوب الثمار أكثر من 10%");
+	if (total > 20) reasons.push("مجموع عيوب الثمار أكثر من 20%");
 	const chemical = chemicalSummary(b, ticket);
 	reasons.push(...chemical.reasons);
 	if (!chemical.limit) reasons.push("لا توجد مواصفة كيميائية لهذا الصنف؛ راجع تعريف الصنف قبل القبول");
@@ -14805,7 +14839,7 @@ function validateAgriculturalInspection(b, now, ticket = {}) {
 		"B",
 		"C"
 	].includes(b.inspectionShift)) throw Error("اختر شفت الفحص");
-	const finalDeduction = reject ? null : number(b.deduction, "نسبة الخصم النهائية", 100);
+	const finalDeduction = reject ? null : number(b.deduction, "نسبة الخصم النهائية", 20);
 	const changed = !reject && (summary.calculatedDeduction === null || finalDeduction !== summary.calculatedDeduction);
 	const reason = reject || changed ? text(b.reason, "سبب قرار الجودة أو تعديل الخصم") : String(b.reason || "").trim().slice(0, 160);
 	const optionalText = (k, label) => reject ? b[k] ? text(b[k], label) : null : text(b[k], label);
@@ -14817,10 +14851,11 @@ function validateAgriculturalInspection(b, now, ticket = {}) {
 	}
 	if (!reject && summary.chemical.limit?.iodine && !iodine) throw Error("استكمل فحص اليود للطماطم");
 	return {
-		schemaVersion: 4,
-		source: "بيان نسب الخصم + مواصفات الاستلام 2026-10-18",
-		policyVersion: "receiving-v4-manual",
-		threshold: 10,
+		schemaVersion: 5,
+		source: "بيان نسب الخصم + مواصفات الاستلام 2026-10-20",
+		policyVersion: "receiving-v5-manual",
+		threshold: 20,
+		maxDeduction: 20,
 		chemicalLimits: summary.chemical.limit,
 		chemicalComplete: summary.chemical.complete,
 		groupBasis: "yellow+small+branches",
@@ -14840,11 +14875,10 @@ function validateAgriculturalInspection(b, now, ticket = {}) {
 		reason,
 		shift: b.inspectionShift || null,
 		allocationNo: optionalText("allocationNo", "رقم التخصيص"),
-		lotNo: optionalText("lotNo", "رقم اللوت"),
 		brix: optionalNumber("brix", 100),
 		ph: optionalNumber("ph", 14),
 		iodine,
-		qcHead: optionalText("qcHead", "اسم رئيس الجودة"),
+		inspectorName: optionalText("inspectorName", "اسم القائم بالفحص"),
 		approvedAt: now,
 		earlyRejection: reject && (!summary.complete || !summary.chemical.complete)
 	};
@@ -14931,7 +14965,7 @@ async function warehouseCycle(db, u, b) {
 		const l = lot();
 		if (l.directFruit) throw Error("الثمار تستلم مباشرة بحوض الإنتاج وتسجل بالأرصدة دون اعتماد المخزن");
 		if (!l.warehousePending) throw Error("تم استلام الباتش بالمخزن بالفعل");
-		if (l.category === "finished" && guardOrder?.data.cycleVersion >= 3 && l.quality !== "A") throw Error("اعتمد جودة المنتج المعبأ قبل استلام المخزن");
+		if (l.quality !== "A") throw Error("يجب اعتماد الجودة بالقبول قبل تأكيد استلام المخزن");
 		if (qty(b.quantity) !== l.expectedQuantity) throw Error("كمية الاستلام لا تطابق المستند؛ راجع الفرق قبل الاعتماد");
 		if (l.id.startsWith("T-")) guardTicket = await db.first("SELECT id,version FROM tickets WHERE id=? AND demo=?", [Number(l.id.slice(2)), demo]);
 		d.warehouseReceipts.push({
@@ -15309,19 +15343,30 @@ async function receivingOperation(db, u, b) {
 		if (!["admin", "quality"].includes(u.role)) throw Error("تأكيد نسبة الخصم متاح للجودة فقط");
 		if (b.confirm !== true || b.deduction === "" || b.deduction == null) throw Error("أدخل نسبة الخصم وأكد مراجعتها");
 		const value = Number(b.deduction);
-		if (!Number.isFinite(value) || value < 0 || value > 100) throw Error("نسبة الخصم يجب أن تكون من صفر إلى 100");
+		if (!Number.isFinite(value) || value < 0 || value > 20 || Math.abs(value * 1e3 - Math.round(value * 1e3)) > 1e-5) throw Error("نسبة الخصم يجب أن تكون من صفر إلى 20");
+		const reviewerName = String(b.reviewerName || "").trim();
+		if (!reviewerName || reviewerName.length > 160) throw Error("أدخل اسم القائم بالتعديل");
 		const previous = d.deduction ?? 0, decision = b.decision || "A";
 		if (!["A", "R"].includes(decision)) throw Error("اختر قرار الجودة");
 		const disposition = qualityDisposition({
 			...b,
 			decision
 		});
+		if (decision === "A" && b.allowProceed !== true) throw Error("أكد السماح بانتقال الشحنة للتفريغ");
 		if (value !== previous && (!String(b.reason || "").trim() || String(b.reason).length > 160)) throw Error("أدخل سبب تعديل نسبة الخصم");
+		if (d.receivingQuality) {
+			d.receivingQualityHistory ||= [];
+			d.receivingQualityHistory.push(d.receivingQuality);
+		}
 		d.receivingQuality = {
+			schemaVersion: 5,
 			...disposition,
 			previous,
 			deduction: value,
 			decision,
+			reviewerName,
+			allowProceed: decision === "A" && b.allowProceed === true,
+			confirmed: true,
 			at: now,
 			by: u.email
 		};
@@ -15334,7 +15379,7 @@ async function receivingOperation(db, u, b) {
 		action = (decision === "R" ? "رفض الشحنة عند الاستلام: " : "تأكيد خصم الاستلام: ") + previous + "% → " + value + "%" + (d.receivingQuality.reason ? " — " + d.receivingQuality.reason : "");
 	} else if (b.action === "unload") {
 		if (!["admin", "production"].includes(u.role)) throw Error("لا توجد صلاحية لتأكيد التفريغ");
-		if (!d.receivingQuality) throw Error("يجب تأكيد نسبة الخصم بواسطة الجودة قبل التفريغ");
+		if (!receivingReady(d)) throw Error("يجب تأكيد نسبة الخصم والسماح بالانتقال بواسطة الجودة قبل التفريغ");
 		if (b.confirm !== true) throw Error("أكد إتمام التفريغ");
 		if (b.orderId !== "" && b.orderId != null) {
 			if (!Number.isSafeInteger(Number(b.orderId)) || Number(b.orderId) < 1) throw Error("اختر أمر تشغيل صالحًا");
@@ -15476,7 +15521,7 @@ function transition(row, action, b, role, now) {
 		if (!["A", "R"].includes(b.decision)) throw Error("اختر A أو R");
 		d.decision = b.decision;
 		d.inspection = d.inspection || documentNumber("inspection", row.id);
-		d.deduction = b.deduction === void 0 || b.deduction === null || String(b.deduction).trim() === "" ? 0 : num(b.deduction, "نسبة الخصم", 0, 100);
+		d.deduction = b.deduction === void 0 || b.deduction === null || String(b.deduction).trim() === "" ? 0 : num(b.deduction, "نسبة الخصم", 0, 20);
 		d.qualityAt = now;
 		d.reason = d.agriculturalQuality?.reason || (b.decision === "R" ? text(b.reason, "سبب الرفض") : "");
 		status = b.decision === "R" ? "rejected" : "gross";
@@ -15485,6 +15530,7 @@ function transition(row, action, b, role, now) {
 		d.grossAt = now;
 		status = "unload";
 	} else if (action === "unload") {
+		if (!receivingReady(d)) throw Error("يجب تأكيد نسبة الخصم والسماح بالانتقال بواسطة الجودة قبل التفريغ");
 		if (b.confirm !== true) throw Error("أكد إتمام التفريغ");
 		d.unloadAt = now;
 		status = "empty";
