@@ -12304,6 +12304,51 @@ function bomPlan(code, target, materials) {
 	};
 }
 //#endregion
+//#region lib/label-batches.ts
+function nextOutputBatch(inv, order) {
+	const confirmations = order.data.confirmations || [];
+	const used = new Set(confirmations.map((c) => c.batch));
+	const mainBatches = new Set(confirmations.filter((c) => c.kind === "main" && (c.code || order.data.code) === order.data.code).map((c) => c.batch));
+	const printed = (inv.state?.labelRuns || []).find((r) => r.orderId === order.id && r.code === order.data.code && r.batchKind === "planned" && !mainBatches.has(r.batch));
+	if (printed) return printed.batch;
+	const prefix = (order.batch || "PB-" + String(order.id).padStart(7, "0")) + "-CF-";
+	let serial = confirmations.length + 1;
+	while (used.has(prefix + serial)) serial++;
+	return prefix + serial;
+}
+function labelBatchChoices(inv, code, orderId) {
+	if (!code) return [];
+	const orders = (inv.orders || []).filter((o) => o.data.type === "Filling" && o.data.code === code && (!orderId || o.id === Number(orderId)));
+	const choices = /* @__PURE__ */ new Map();
+	const add = (batch, order, kind) => {
+		if (typeof batch !== "string" || !batch.trim()) return;
+		const id = order?.id || null;
+		const ref = JSON.stringify([id, batch]);
+		if (!choices.has(ref)) choices.set(ref, {
+			ref,
+			batch,
+			orderId: id,
+			orderNumber: order?.number || "",
+			kind
+		});
+	};
+	for (const o of orders) for (const c of o.data.confirmations || []) if (c.kind === "main" && (c.code || o.data.code) === code) add(c.batch, o, "produced");
+	for (const l of inv.lots || []) {
+		if (l.code !== code || l.category !== "finished") continue;
+		const o = orders.find((o) => o.id === l.orderId);
+		if (l.orderId && !o || orderId && !o) continue;
+		add(l.batch, o, "produced");
+	}
+	for (const o of orders) if (o.status === "open") add(nextOutputBatch(inv, o), o, "planned");
+	for (const r of inv.state?.labelRuns || []) {
+		if (r.code !== code) continue;
+		const o = orders.find((o) => o.id === r.orderId);
+		if (r.orderId && !o || orderId && !o) continue;
+		add(r.batch, o, r.batchKind === "planned" ? "planned" : "recorded");
+	}
+	return [...choices.values()];
+}
+//#endregion
 //#region lib/production-cycle.ts
 var round$2 = (n) => Math.round(n * 1e3) / 1e3;
 var text$1 = (v) => {
@@ -12490,7 +12535,8 @@ function newInventoryAction(inv, u, b, now, id) {
 	}
 	if (op === "inventory_label_link") {
 		const r = d.labelRuns.find((r) => r.id === b.runId && !r.outputLotId), o = inv.orders.find((o) => o.id === Number(b.orderId)), c = o?.data.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
-		if (!r || !c || o.data.type !== "Filling" || r.code !== c.code || r.batch !== c.batch) throw Error("اختر دفعة معبأة تطابق كود وباتش الملصقات");
+		if (!r || !c || o.data.type !== "Filling" || r.code !== c.code || r.batch !== c.batch || r.orderId && r.orderId !== o.id) throw Error("اختر دفعة معبأة تطابق كود وباتش الملصقات");
+		assertScope(inv, u, { lineId: o.data.lineId });
 		const count = (o.data.weights || []).filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.count, 0), used = d.labelRuns.filter((x) => x.outputLotId === "P-" + o.id + "-" + c.id).reduce((n, x) => n + x.count, 0);
 		if (r.count + used > count) throw Error("عدد الملصقات أكبر من عدد العبوات المسجلة");
 		Object.assign(r, {
@@ -12514,24 +12560,26 @@ function newInventoryAction(inv, u, b, now, id) {
 		};
 		const productionDate = date(b.productionDate), expiryDate = date(b.expiryDate);
 		if (productionDate && expiryDate && expiryDate < productionDate) throw Error("الصلاحية تسبق الإنتاج");
-		let o = null;
-		if (b.orderId) {
-			o = inv.orders.find((o) => o.id === Number(b.orderId));
-			if (!o || o.data.type !== "Filling" || o.data.code !== m.code) throw Error("أمر التعبئة لا يطابق المنتج");
-		}
+		if (b.orderId && !inv.orders.some((o) => o.id === Number(b.orderId) && o.data.type === "Filling" && o.data.code === m.code)) throw Error("أمر التعبئة لا يطابق المنتج");
+		const matches = labelBatchChoices(inv, m.code, b.orderId).filter((c) => b.batchRef ? c.ref === b.batchRef : c.batch === b.batch);
+		if (matches.length !== 1) throw Error("اختر رقم الباتش من الباتشات المسجلة للصنف");
+		const selected = matches[0], o = inv.orders.find((o) => o.id === selected.orderId);
+		if (o) assertScope(inv, u, { lineId: o.data.lineId });
 		const start = d.labelRuns.reduce((n, r) => Math.max(n, r.end), 0) + 1;
 		d.labelRuns.push({
 			id,
 			number: "LP-" + String(d.labelRuns.length + 1).padStart(7, "0"),
 			code: m.code,
 			name: m.name,
-			batch: text$1(b.batch),
+			batch: selected.batch,
+			batchRef: selected.ref,
+			batchKind: selected.kind,
 			count,
 			start,
 			end: start + count - 1,
 			serialPrefix: b.demo === true ? "LB-D-" : "LB-L-",
-			orderId: o?.id || null,
-			orderNumber: o?.number || "",
+			orderId: selected.orderId,
+			orderNumber: selected.orderNumber,
 			nominalWeight: b.nominalWeight == null || b.nominalWeight === "" ? null : quantity(b.nominalWeight),
 			productionDate,
 			expiryDate,
@@ -13045,7 +13093,7 @@ async function productionOperation(db, u, b) {
 			warehouse,
 			quantity: qty(b.quantity),
 			requiresWarehouseReceipt: true,
-			batch: b.batch ? required(b.batch, "الباتش") : order.batch + "-CF-" + (d.confirmations.length + 1),
+			batch: b.batch ? required(b.batch, "الباتش") : d.type === "Filling" && b.kind === "main" ? nextOutputBatch(inv, order) : order.batch + "-CF-" + (d.confirmations.length + 1),
 			stock: b.kind === "main" ? "Quality Stock" : "Unrestricted Stock",
 			at: now,
 			by: u.email,
@@ -15473,4 +15521,4 @@ function normalizePlate(value) {
 var createTicketSql = `INSERT INTO tickets (demo,version,status,data,history,created_at) SELECT ?,1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM tickets WHERE demo=? AND coalesce(json_extract(data,'$.plateKey'),${plateReplacements.reduce((sql, [a, b]) => `replace(${sql},'${a}','${b}')`, "lower(json_extract(data,'$.plate'))")})=? AND created_at>?)`;
 var duplicatePlateMessage = "السيارة مسجلة بالفعل خلال آخر 4 ساعات. افتح التذكرة الحالية لاستكمال الإجراءات، أو أعد التسجيل بعد انقضاء المدة.";
 //#endregion
-export { assignTicketOrder, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, inventoryOperation, inventorySnapshot, normalizePlate, productionOperation, receivingOperation, roles, stages, statuses, text, transition, validateCatalog, warehouseCycle };
+export { assignTicketOrder, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, inventoryOperation, inventorySnapshot, labelBatchChoices, nextOutputBatch, normalizePlate, productionOperation, receivingOperation, roles, stages, statuses, text, transition, validateCatalog, warehouseCycle };
