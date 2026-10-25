@@ -1,3 +1,131 @@
+//#region lib/cairo-time.ts
+function cairoLocalISO(value) {
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw Error("توقيت القاهرة غير صحيح");
+	const desired = Date.parse(value + ":00Z");
+	if (!Number.isFinite(desired)) throw Error("توقيت القاهرة غير صحيح");
+	let at = desired;
+	const fmt = new Intl.DateTimeFormat("sv-SE", {
+		timeZone: "Africa/Cairo",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23"
+	});
+	for (let n = 0; n < 3; n++) {
+		const shown = fmt.format(new Date(at)).replace(" ", "T");
+		const delta = desired - Date.parse(shown + ":00Z");
+		at += delta;
+		if (!delta) break;
+	}
+	if (fmt.format(new Date(at)).replace(" ", "T") !== value) throw Error("التوقيت غير موجود بسبب تغيير الساعة");
+	return new Date(at).toISOString();
+}
+//#endregion
+//#region lib/auto-shifts.ts
+var dateFormat = new Intl.DateTimeFormat("en-CA", {
+	timeZone: "Africa/Cairo",
+	year: "numeric",
+	month: "2-digit",
+	day: "2-digit"
+});
+var timeFormat = new Intl.DateTimeFormat("en-GB", {
+	timeZone: "Africa/Cairo",
+	hour: "2-digit",
+	hourCycle: "h23"
+});
+var nextDay = (day, delta) => new Date(Date.parse(day + "T12:00:00Z") + delta * 864e5).toISOString().slice(0, 10);
+function boundary(day, time) {
+	try {
+		return cairoLocalISO(day + "T" + time);
+	} catch (error) {
+		if (time !== "00:00") throw error;
+		for (let minute = 1; minute <= 120; minute++) {
+			const clock = String(Math.floor(minute / 60)).padStart(2, "0") + ":" + String(minute % 60).padStart(2, "0");
+			try {
+				return cairoLocalISO(day + "T" + clock);
+			} catch {}
+		}
+		throw error;
+	}
+}
+function operatingShift(at = (/* @__PURE__ */ new Date()).toISOString()) {
+	const date = new Date(at);
+	if (!Number.isFinite(date.valueOf())) throw Error("وقت الحركة غير صالح");
+	const calendarDay = dateFormat.format(date), hour = Number(timeFormat.format(date)), slot = hour < 8 ? 3 : hour < 16 ? 1 : 2, day = hour < 8 ? nextDay(calendarDay, -1) : calendarDay;
+	const startDay = slot === 3 ? nextDay(day, 1) : day, endDay = slot === 2 || slot === 3 ? nextDay(day, 1) : day;
+	const start = slot === 1 ? "08:00" : slot === 2 ? "16:00" : "00:00", end = slot === 1 ? "16:00" : slot === 2 ? "00:00" : "08:00";
+	return {
+		id: "AUTO-" + day + "-" + slot,
+		slot,
+		name: slot === 1 ? "صباحي — 08:00 إلى 16:00" : slot === 2 ? "مسائي — 16:00 إلى 00:00" : "ليلي — 00:00 إلى 08:00",
+		day,
+		calendarDay,
+		startAt: boundary(startDay, start),
+		endAt: boundary(endDay, end),
+		automatic: true,
+		timeZone: "Africa/Cairo"
+	};
+}
+function shiftMetadata(at = (/* @__PURE__ */ new Date()).toISOString()) {
+	const s = operatingShift(at);
+	return {
+		shiftId: s.id,
+		shiftName: s.name,
+		shiftSlot: s.slot,
+		day: s.day,
+		calendarDay: s.calendarDay,
+		shiftStart: s.startAt,
+		shiftEnd: s.endAt,
+		automaticShift: true,
+		timeZone: s.timeZone
+	};
+}
+function mergeOrderShifts(state, o, at = (/* @__PURE__ */ new Date()).toISOString()) {
+	o.data.shifts ||= [];
+	for (const s of state.operationShifts || []) if (s.orderId === o.id && !o.data.shifts.some((x) => x.id === s.id)) o.data.shifts.push({ ...s });
+	for (const s of o.data.shifts) if (s.automatic && !s.closedAt && s.endAt <= at) {
+		s.closedAt = s.endAt;
+		s.closedBy = "SYSTEM";
+		s.autoEnded = true;
+	}
+	return o;
+}
+function ensureAutoShift(inv, o, u, now, saveTo = "inventory") {
+	const clock = operatingShift(now);
+	if (clock.day < o.data.from || clock.day > o.data.to) throw Error("توقيت الحركة خارج فترة أمر التشغيل");
+	mergeOrderShifts(inv.state, o, now);
+	let s = o.data.shifts.find((s) => s.id === clock.id);
+	if (s?.closedAt) throw Error("الشيفت الحالي مغلق؛ راجع مسؤول التشغيل");
+	if (!s) {
+		s = {
+			...clock,
+			orderId: o.id,
+			openedAt: now,
+			openedBy: u.email,
+			closedAt: null,
+			notes: ""
+		};
+		o.data.shifts.push(s);
+	}
+	if (saveTo === "inventory") {
+		inv.state.operationShifts ||= [];
+		if (!inv.state.operationShifts.some((r) => r.orderId === o.id && r.id === s.id)) inv.state.operationShifts.push({ ...s });
+	}
+	o.data.executionStart ||= now;
+	return s;
+}
+function tagNewMovements(state, now) {
+	const tag = shiftMetadata(now);
+	const visit = (value) => {
+		if (!value || typeof value !== "object") return;
+		if (!Array.isArray(value) && value.at === now && value.by && !value.automaticShift) Object.assign(value, tag);
+		for (const v of Object.values(value)) if (v && typeof v === "object") visit(v);
+	};
+	visit(state);
+}
+//#endregion
 //#region lib/fruit-receiving.ts
 function fruitReceiptLocation(state, id) {
 	const lotId = "T-" + id;
@@ -86,7 +214,8 @@ function assertWarehouse(u, code) {
 	if (!warehouseAllowed(actualRole(u), code)) throw Error("المخزن خارج نطاق صلاحيتك");
 }
 function assertApprover(u, createdBy, demo) {
-	if (!["admin", "plant_manager"].includes(actualRole(u))) throw Error("الاعتماد من صلاحية مدير المصنع");
+	if (actualRole(u) === "admin") return;
+	if (!["plant_manager"].includes(actualRole(u))) throw Error("الاعتماد من صلاحية مدير المصنع");
 	if (!demo && u.email === createdBy) throw Error("منشئ الطلب لا يعتمد طلبه في سجل التشغيل");
 }
 //#endregion
@@ -12382,7 +12511,7 @@ function labelBatchChoices(inv, code, orderId) {
 }
 //#endregion
 //#region lib/production-cycle.ts
-var round$2 = (n) => Math.round(n * 1e3) / 1e3;
+var round$3 = (n) => Math.round(n * 1e3) / 1e3;
 var text$1 = (v) => {
 	if (typeof v !== "string" || !v.trim() || v.length > 160) throw Error("أدخل المرجع أو الملاحظات بشكل صحيح");
 	return v.trim();
@@ -12458,8 +12587,8 @@ function transferLots(d, lots) {
 }
 function transferAmounts(d, id) {
 	return {
-		out: d.transfers.filter((t) => t.sourceLotId === id && t.receivedAt).reduce((n, t) => round$2(n + t.quantity), 0),
-		pending: d.transfers.filter((t) => t.sourceLotId === id && !t.receivedAt && !t.cancelledAt).reduce((n, t) => round$2(n + t.quantity), 0)
+		out: d.transfers.filter((t) => t.sourceLotId === id && t.receivedAt).reduce((n, t) => round$3(n + t.quantity), 0),
+		pending: d.transfers.filter((t) => t.sourceLotId === id && !t.receivedAt && !t.cancelledAt).reduce((n, t) => round$3(n + t.quantity), 0)
 	};
 }
 function packedChoices(inv, bulkCode) {
@@ -12494,14 +12623,13 @@ function newInventoryAction(inv, u, b, now, id) {
 		if (!l || l.quality !== "A" || l.warehousePending || amount > l.available + ownQty) throw Error("الرصيد المعتمد لا يكفي للتحويل");
 		if (l.unit === "PC" && !Number.isInteger(amount)) throw Error("عدد القطع يجب أن يكون صحيحًا");
 		if (!inv.warehouses.some((w) => w.code === b.toWarehouse) || l.warehouse === b.toWarehouse || l.warehouse !== "PROD" && b.toWarehouse !== "PROD") throw Error("اختر تحويلًا من أو إلى مخزن الإنتاج");
-		if (!/^\d{4}-\d{2}-\d{2}$/.test(b.day) || !Number.isFinite(Date.parse(b.day)) || new Date(b.day).toISOString().slice(0, 10) !== b.day || b.day > today()) throw Error("تاريخ التحويل غير صحيح أو مستقبلي");
 		const allocations = [];
 		let left = amount;
 		for (const r of own) {
 			const n = Math.min(left, r.remaining);
 			if (n > 0) {
-				r.remaining = round$2(r.remaining - n);
-				left = round$2(left - n);
+				r.remaining = round$3(r.remaining - n);
+				left = round$3(left - n);
 				allocations.push({
 					orderId: r.orderId,
 					code: l.code,
@@ -12510,7 +12638,7 @@ function newInventoryAction(inv, u, b, now, id) {
 				});
 			}
 		}
-		const { id: unused, warehouse, quantity: q, balance, available, reserved, prepared, ...material } = l;
+		const { id: unused, warehouse, quantity: q, balance, available, reserved, prepared, automaticShift, shiftId, shiftName, shiftSlot, day, calendarDay, shiftStart, shiftEnd, timeZone, ...material } = l;
 		d.transfers.push({
 			id,
 			number: "TR-" + String(d.transfers.length + 1).padStart(7, "0"),
@@ -12525,7 +12653,7 @@ function newInventoryAction(inv, u, b, now, id) {
 			quantity: amount,
 			fromWarehouse: l.warehouse,
 			toWarehouse: b.toWarehouse,
-			day: b.day,
+			...shiftMetadata(now),
 			reason: text$1(b.reason),
 			at: now,
 			by: u.email
@@ -12538,7 +12666,7 @@ function newInventoryAction(inv, u, b, now, id) {
 		if (op === "inventory_transfer_cancel") {
 			for (const a of t.allocations || []) {
 				const r = d.reservations.find((r) => r.id === a.reservationId);
-				if (r) r.remaining = round$2(r.remaining + a.quantity);
+				if (r) r.remaining = round$3(r.remaining + a.quantity);
 			}
 			t.cancelledAt = now;
 			t.cancelledBy = u.email;
@@ -12552,6 +12680,7 @@ function newInventoryAction(inv, u, b, now, id) {
 		assertScope(inv, u, { warehouse: t.toWarehouse });
 		t.receivedAt = now;
 		t.receivedBy = u.email;
+		t.receivingShift = shiftMetadata(now);
 		for (const a of t.allocations || []) d.reservations.push({
 			id: "RES-" + crypto.randomUUID(),
 			orderId: a.orderId,
@@ -12625,7 +12754,7 @@ function newInventoryAction(inv, u, b, now, id) {
 }
 //#endregion
 //#region lib/cycle-state.ts
-var round$1 = (v) => Math.round(v * 1e3) / 1e3;
+var round$2 = (v) => Math.round(v * 1e3) / 1e3;
 function normalizeCycle(d) {
 	for (const key of [
 		"warehouseReceipts",
@@ -12654,16 +12783,16 @@ function wipRows(inv, orderId) {
 		const key = i.orderId + "|" + i.code, loss = Math.min(Math.max(0, i.quantity - returned - used - packed), waste.get(key) || 0);
 		waste.set(key, (waste.get(key) || 0) - loss);
 		const pendingReturn = d.returnRequests.filter((r) => r.issueId === i.id && !r.acceptedAt && !r.cancelledAt).reduce((s, r) => s + r.quantity, 0);
-		const remaining = round$1(i.quantity - returned - used - packed - loss);
+		const remaining = round$2(i.quantity - returned - used - packed - loss);
 		return {
 			...i,
 			category: i.category || inv.materials?.find((m) => m.code === i.code)?.category,
 			returned,
-			used: round$1(used + packed),
-			waste: round$1(loss),
+			used: round$2(used + packed),
+			waste: round$2(loss),
 			remaining,
 			pendingReturn,
-			free: round$1(remaining - pendingReturn)
+			free: round$2(remaining - pendingReturn)
 		};
 	});
 }
@@ -12684,7 +12813,7 @@ function custodyRows(inv) {
 			outgoing: p.quantity,
 			returned,
 			settled,
-			remaining: round$1(p.quantity - returned - settled),
+			remaining: round$2(p.quantity - returned - settled),
 			due: doc.due,
 			at: doc.at
 		};
@@ -12705,7 +12834,7 @@ function cycleLots(state, lots) {
 		}
 		const inspection = d.incomingInspections.find((q) => q.lotId === l.id);
 		if (l.requiresQuality) l.quality = inspection?.decision || "H";
-		l.delivered = round$1(d.deliveries.filter((x) => x.lotId === l.id).reduce((s, x) => s + x.quantity, 0));
+		l.delivered = round$2(d.deliveries.filter((x) => x.lotId === l.id).reduce((s, x) => s + x.quantity, 0));
 	}
 }
 //#endregion
@@ -12778,7 +12907,7 @@ var decodeOrder = (r) => {
 };
 async function productionOperation(db, u, b) {
 	u = operator(u, b.action);
-	const now = (/* @__PURE__ */ new Date()).toISOString(), op = b.action, permissions = {
+	const now = (/* @__PURE__ */ new Date()).toISOString(), fastOutput = b.action === "production_confirm_usage", op = fastOutput ? "production_confirm" : b.action, permissions = {
 		production_rate: ["production"],
 		production_balance: ["production"],
 		production_balance_decide: ["admin"],
@@ -12837,6 +12966,7 @@ async function productionOperation(db, u, b) {
 			to,
 			createdAt: now,
 			createdBy: u.email,
+			creationShift: shiftMetadata(now),
 			requirements: plan?.inputs || (source ? [{
 				code: source.code,
 				name: source.name,
@@ -12883,11 +13013,19 @@ async function productionOperation(db, u, b) {
 	}
 	if (!Number.isSafeInteger(b.orderId) || !Number.isSafeInteger(b.version)) throw Error("رقم أمر غير صالح");
 	const raw = await db.first("SELECT * FROM production_orders WHERE id=?", [b.orderId]);
-	if (!raw || raw.version !== b.version || raw.status !== "open") throw Error("الأمر مغلق أو تغير؛ حدّث الصفحة");
-	const order = decodeOrder(raw), d = order.data, inv = await inventorySnapshot(db, raw.demo);
+	if (!raw) throw Error("الأمر غير موجود");
+	const inv = await inventorySnapshot(db, raw.demo);
+	if (fastOutput) {
+		if (raw.demo !== (b.demo === true ? 1 : 0)) throw Error("الأمر خارج سجل التشغيل الحالي");
+		const previous = completedFast(inv, b, u);
+		if (previous) return previous;
+		if (!Number.isSafeInteger(b.inventoryVersion) || b.inventoryVersion !== inv.version) throw Error("تغيرت المواد المستلمة؛ أعد مراجعة الاستهلاك");
+	}
+	if (raw.version !== b.version || raw.status !== "open") throw Error("الأمر مغلق أو تغير؛ حدّث الصفحة");
+	const order = mergeOrderShifts(inv.state, decodeOrder(raw), now), d = order.data;
 	let action = "", status = "open";
 	assertScope(inv, u, { lineId: d.lineId });
-	assertDayOpen(inv, b.day || dateInCairo(now));
+	assertDayOpen(inv, operatingShift(now).day);
 	if (![
 		"production_rate",
 		"production_requirement",
@@ -12895,17 +13033,24 @@ async function productionOperation(db, u, b) {
 		"production_change_decide"
 	].includes(op)) assertReleased(inv, order);
 	if (["production_shift", "production_confirm"].includes(op)) assertLineReady(inv, order);
+	const automaticJob = d.automaticFilling && (inv.state.automaticFillingJobs || []).find((j) => j.key === d.automaticFilling.key);
+	if (automaticJob && automaticJob.status !== "completed") throw Error("أمر التعبئة التلقائي ينتظر استكمال الجودة والمواد؛ استخدم متابعة التعبئة التلقائية");
 	const openShift = () => {
+		if (op !== "production_close_shift") {
+			const s = ensureAutoShift(inv, order, u, now, "order");
+			assertDayOpen(inv, s.day);
+			return s;
+		}
 		const s = d.shifts.find((s) => s.id === b.shiftId);
 		if (!s || s.closedAt) throw Error("اختر شفتًا مفتوحًا");
 		return s;
 	};
 	const balanceTotals = () => ({
-		input: round(inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
-		main: round(d.confirmations.filter((c) => c.kind === "main" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
-		byproducts: round(d.confirmations.filter((c) => c.kind === "byproduct" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0))
+		input: round$1(inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
+		main: round$1(d.confirmations.filter((c) => c.kind === "main" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0)),
+		byproducts: round$1(d.confirmations.filter((c) => c.kind === "byproduct" && c.unit === "KG").reduce((n, c) => n + c.quantity, 0))
 	});
-	const netIssue = (i) => round(i.quantity - inv.state.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0));
+	const netIssue = (i) => round$1(i.quantity - inv.state.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0));
 	const issues = inv.state.issues.filter((i) => i.orderId === raw.id);
 	if (op === "production_rate") {
 		d.lineDailyRate = qty(b.lineDailyRate);
@@ -13057,7 +13202,7 @@ async function productionOperation(db, u, b) {
 	if (op === "production_handover_accept") {
 		const h = (d.handovers || []).find((h) => h.id === b.handoverId && !h.acceptedAt);
 		if (!h) throw Error("تسليم الشفت غير متاح");
-		if (!raw.demo && h.by === u.email) throw Error("استلام الشفت بواسطة مستخدم آخر");
+		if (!raw.demo && h.by === u.email && actualRole(u) !== "admin") throw Error("استلام الشفت بواسطة مستخدم آخر");
 		h.acceptedAt = now;
 		h.acceptedBy = u.email;
 		h.acceptanceNotes = required(b.reason, "ملاحظات استلام الشفت");
@@ -13084,7 +13229,7 @@ async function productionOperation(db, u, b) {
 			for (const key of ["productionStart", "productionEnd"]) if (typeof b[key] !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(b[key]) || !Number.isFinite(Date.parse(b[key])) || Date.parse(b[key]) > Date.parse(now)) throw Error("وقت الإنتاج غير صحيح أو مستقبلي");
 			productionStart = new Date(b.productionStart).toISOString();
 			productionEnd = new Date(b.productionEnd).toISOString();
-			if (productionEnd < productionStart || dateInCairo(productionStart) !== s.day) throw Error("راجع ترتيب وقت الإنتاج ويوم الشفت");
+			if (productionEnd < productionStart || operatingShift(productionStart).day !== s.day) throw Error("راجع ترتيب وقت الإنتاج ويوم الشفت");
 		}
 		if (b.parentConfirmationId && !d.confirmations.some((c) => c.id === b.parentConfirmationId && c.kind === "main")) throw Error("اختر دفعة البلك المصدر من نفس الأمر");
 		if (d.cycleVersion >= 3 && b.kind === "main") {
@@ -13100,12 +13245,12 @@ async function productionOperation(db, u, b) {
 				if (d.cycleVersion >= 4) {
 					const cip = controls(inv.state).cip.find((r) => r.id === b.cipId && r.lineId === d.lineId && r.decision === "A");
 					const line = controls(inv.state).machines.find((m) => m.id === d.lineId);
-					if (!cip || cip.end < (line?.statusAt || "") || dateInCairo(cip.end) !== s.day) throw Error("اختر دورة CIP معتمدة لنفس الخط ويوم التشغيل بعد آخر صيانة");
+					if (!cip || cip.end < (line?.statusAt || "") || operatingShift(cip.end).day !== s.day) throw Error("اختر دورة CIP معتمدة لنفس الخط ويوم التشغيل بعد آخر صيانة");
 				}
 			}
 		}
 		const expiryDate = b.expiryDate ? day$1(b.expiryDate) : "";
-		if (expiryDate && expiryDate < s.day) throw Error("صلاحية الناتج تسبق يوم الإنتاج");
+		if (expiryDate && expiryDate < dateInCairo(now)) throw Error("صلاحية الناتج تسبق يوم الإنتاج");
 		d.confirmations.push({
 			productionStart,
 			productionEnd,
@@ -13137,7 +13282,7 @@ async function productionOperation(db, u, b) {
 		const c = d.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
 		if (d.type !== "Filling" || !c) throw Error("اختر دفعة منتج معبأ");
 		const s = openShift();
-		const count = Number(b.count), gross = qty(b.gross), tare = qty(b.tare), net = round(gross - tare);
+		const count = Number(b.count), gross = qty(b.gross), tare = qty(b.tare), net = round$1(gross - tare);
 		if (!Number.isSafeInteger(count) || count <= 0 || count > 1e5 || net <= 0) throw Error("راجع عدد العبوات وأوزانها");
 		d.weights ||= [];
 		if (net + d.weights.filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.net, 0) > c.quantity) throw Error("صافي أوزان العبوات يتجاوز كمية الناتج");
@@ -13171,7 +13316,7 @@ async function productionOperation(db, u, b) {
 			evaporation,
 			loss,
 			remaining,
-			difference: round(total.input + extraInput - total.main - total.byproducts - evaporation - loss - remaining),
+			difference: round$1(total.input + extraInput - total.main - total.byproducts - evaporation - loss - remaining),
 			reference: required(b.reason, "مرجع موازنة التصنيع"),
 			at: now,
 			by: u.email
@@ -13221,7 +13366,7 @@ async function productionOperation(db, u, b) {
 		].includes(b.decision)) throw Error("اختر قرار الجودة");
 		const color = String(b.color || "").trim(), grade = String(b.grade || "").trim();
 		if (b.decision === "A") {
-			if (d.cycleVersion >= 3 && d.type === "Filling" && c.kind === "main" && round((d.weights || []).filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.net, 0)) !== c.quantity) throw Error("استكمل تسجيل أوزان العبوات لتطابق كمية الناتج");
+			if (d.cycleVersion >= 3 && d.type === "Filling" && c.kind === "main" && round$1((d.weights || []).filter((w) => w.confirmationId === c.id).reduce((n, w) => n + w.net, 0)) !== c.quantity) throw Error("استكمل تسجيل أوزان العبوات لتطابق كمية الناتج");
 			required(color, "قيمة اللون");
 			required(grade, "تصنيف الجودة");
 		}
@@ -13279,7 +13424,12 @@ async function productionOperation(db, u, b) {
 		if (inv.lots.some((l) => l.orderId === raw.id && l.warehousePending && l.quality !== "R")) throw Error("استكمل استلام الناتج بالمخزن");
 		if ((inv.state.preparations || []).some((p) => p.orderId === raw.id && p.quantity > p.received + p.cancelled)) throw Error("استلم أو ألغِ التجهيزات المعلقة");
 		if (!d.confirmations.length) throw Error("لا يوجد إنتاج مسجل");
-		if (d.shifts.some((s) => !s.closedAt)) throw Error("أغلق الشفتات");
+		if (d.shifts.some((s) => !s.closedAt && !s.automatic)) throw Error("أغلق الشفتات");
+		for (const s of d.shifts) if (s.automatic && !s.closedAt) {
+			s.closedAt = now;
+			s.closedBy = u.email;
+			s.orderEnded = true;
+		}
 		if (d.confirmations.some((c) => (c.kind === "main" || d.cycleVersion >= 3) && !["A", "R"].includes(c.decision))) throw Error("استكمل فحوص الجودة المعلقة");
 		if (issues.some((i) => !i.acceptedAt && netIssue(i) > 0)) throw Error("أكد استلام المواد المصروفة أو أرجعها");
 		if (inv.state.reservations.some((r) => r.orderId === raw.id && r.remaining > 0)) throw Error("اصرف أو فك الحجوزات المتبقية");
@@ -13287,11 +13437,34 @@ async function productionOperation(db, u, b) {
 		status = "closed";
 		action = "إغلاق الأمر";
 	}
+	if (fastOutput) {
+		applyOutputUsage(inv, order, d.confirmations[d.confirmations.length - 1], b, u, now);
+		action = "تسجيل ناتج واستهلاك فعلي في عملية واحدة";
+	}
+	const automaticDraft = op === "production_confirm" ? prepareAutomaticFilling(inv, order, d.confirmations[d.confirmations.length - 1], b, u, now) : null;
 	d.history.push({
 		at: now,
 		by: u.email,
 		action
 	});
+	tagNewMovements(d, now);
+	if (automaticDraft) {
+		const c = d.confirmations[d.confirmations.length - 1], result = {
+			ok: true,
+			orderId: order.id,
+			confirmationId: c.id,
+			batch: c.batch,
+			outputLotId: "P-" + order.id + "-" + c.id,
+			automaticFillingKey: automaticDraft.job.key,
+			...fastOutput ? { operationKey: fastKey(b) } : {}
+		};
+		if (fastOutput) {
+			d.lastFastOutputKey = fastKey(b);
+			rememberFast(inv, b, u, result, now);
+		}
+		return commitAutomaticOutput(db, inv, order, automaticDraft, result, now, b, u);
+	}
+	if (fastOutput) return commitOutputUsage(db, inv, order, b, u, now);
 	if (!(await db.run("UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND version=? AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=?", [
 		JSON.stringify(d),
 		status,
@@ -13302,7 +13475,8 @@ async function productionOperation(db, u, b) {
 	])).changes) throw Error("تغير الأمر أو المخزون؛ حدّث البيانات");
 	return {
 		ok: true,
-		orderId: raw.id
+		orderId: raw.id,
+		...op === "production_quality" ? await safeAutomaticFilling(db, u, raw.demo, { parentOrderId: raw.id }) : {}
 	};
 }
 async function assignTicketOrder() {
@@ -13516,7 +13690,7 @@ var qty = (v) => {
 	if (v === "" || v == null || !Number.isFinite(n) || n <= 0 || n > 1e9 || Math.abs(n * 1e3 - Math.round(n * 1e3)) > 1e-5) throw Error("الكمية موجبة وبحد أقصى 3 أرقام عشرية");
 	return n;
 };
-var round = (n) => Math.round(n * 1e3) / 1e3;
+var round$1 = (n) => Math.round(n * 1e3) / 1e3;
 var parse = (r) => ({
 	...r,
 	data: typeof r.data === "string" ? JSON.parse(r.data) : r.data
@@ -13544,6 +13718,7 @@ async function inventorySnapshot(db, demo) {
 		db.first("SELECT data FROM catalogs WHERE id=?", [demo])
 	]);
 	const ts = tickets.map(parse), os = orders.map(decodeOrder), catalog = cat ? JSON.parse(cat.data) : defaultCatalog;
+	for (const o of os) mergeOrderShifts(state, o);
 	const materials = [...state.materials];
 	const add = (m) => {
 		if (!materials.some((x) => x.code === m.code)) materials.push(m);
@@ -13561,7 +13736,7 @@ async function inventorySnapshot(db, demo) {
 		if (m) m.receivingKind = "fruit";
 	}
 	for (const o of os) {
-		add({
+		if (o.data.code) add({
 			code: o.data.code,
 			name: o.data.name,
 			category: o.data.type === "Filling" ? "finished" : "semi",
@@ -13662,12 +13837,12 @@ async function inventorySnapshot(db, demo) {
 	for (const l of lots) {
 		const tx = transferAmounts(state, l.id);
 		l.transferred = tx.out;
-		l.issued = round(state.issues.filter((i) => i.lotId === l.id).reduce((n, i) => n + i.quantity, 0) - state.returns.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.quantity, 0) + l.legacy);
+		l.issued = round$1(state.issues.filter((i) => i.lotId === l.id).reduce((n, i) => n + i.quantity, 0) - state.returns.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.quantity, 0) + l.legacy);
 		l.adjustment = state.adjustments.filter((a) => a.lotId === l.id).reduce((n, a) => n + a.quantity, 0);
-		l.balance = round(l.quantity + l.adjustment - l.issued - l.delivered - l.transferred);
-		l.prepared = round(state.preparations.filter((p) => p.lotId === l.id).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0));
-		l.reserved = round(tx.pending + l.prepared + state.reservations.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.remaining, 0));
-		l.available = l.quality === "A" && !l.warehousePending ? round(l.balance - l.reserved) : 0;
+		l.balance = round$1(l.quantity + l.adjustment - l.issued - l.delivered - l.transferred);
+		l.prepared = round$1(state.preparations.filter((p) => p.lotId === l.id).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0));
+		l.reserved = round$1(tx.pending + l.prepared + state.reservations.filter((r) => r.lotId === l.id).reduce((n, r) => n + r.remaining, 0));
+		l.available = l.quality === "A" && !l.warehousePending ? round$1(l.balance - l.reserved) : 0;
 	}
 	const today = new Intl.DateTimeFormat("en-CA", {
 		timeZone: "Africa/Cairo",
@@ -13699,11 +13874,11 @@ async function inventorySnapshot(db, demo) {
 			};
 			balances.push(b);
 		}
-		b.balance = round(b.balance + l.balance);
-		b.reserved = round(b.reserved + l.reserved);
-		b.available = round(b.available + l.available);
-		if (l.quality === "H") b.pending = round(b.pending + l.balance);
-		if (l.quality === "R") b.rejected = round(b.rejected + l.balance);
+		b.balance = round$1(b.balance + l.balance);
+		b.reserved = round$1(b.reserved + l.reserved);
+		b.available = round$1(b.available + l.available);
+		if (l.quality === "H") b.pending = round$1(b.pending + l.balance);
+		if (l.quality === "R") b.rejected = round$1(b.rejected + l.balance);
 	}
 	for (const m of materials) {
 		if (masterData.retired.some((r) => r.code === m.code)) continue;
@@ -13784,12 +13959,13 @@ async function inventoryOperation(db, u, b) {
 		"inventory_material",
 		"inventory_warehouse",
 		"inventory_price"
-	].includes(op)) assertDayOpen(inv, b.day || dateInCairo(now));
+	].includes(op)) assertDayOpen(inv, operatingShift(now).day);
 	if (orderOps.includes(op)) {
 		order = inv.orders.find((o) => o.id === Number(b.orderId));
 		if (!order || order.status !== "open" || order.version !== b.orderVersion) throw Error("اختر أمرًا مفتوحًا وحدّث بياناته");
 		assertReleased(inv, order);
 		assertScope(inv, u, { lineId: order.data.lineId });
+		ensureAutoShift(inv, order, u, now);
 	}
 	const lot = inv.lots.find((l) => l.id === b.lotId), material = inv.materials.find((m) => m.code === b.code);
 	const needLot = () => {
@@ -13943,16 +14119,16 @@ async function inventoryOperation(db, u, b) {
 		if (b.supplyRequestId) {
 			const req = d.supplyRequests.find((r) => r.id === b.supplyRequestId && r.orderId === order.id && r.code === l.code && !r.cancelledAt);
 			const prepared = d.preparations.filter((p) => p.supplyRequestId === b.supplyRequestId).reduce((n, p) => n + p.quantity - p.cancelled, 0);
-			if (!req || amount > round(req.quantity - prepared)) throw Error("التجهيز يتجاوز طلب الصرف");
+			if (!req || amount > round$1(req.quantity - prepared)) throw Error("التجهيز يتجاوز طلب الصرف");
 		}
 		const own = d.reservations.filter((r) => r.orderId === order.id && r.lotId === l.id && r.remaining > 0), ownQty = own.reduce((n, r) => n + r.remaining, 0);
 		const added = d.preparations.filter((p) => p.lotId === l.id && p.requestId === id).reduce((n, p) => n + p.quantity, 0);
-		if (amount > round(l.available + ownQty - added)) throw Error("الرصيد المتاح لا يكفي لتجهيز " + l.code);
+		if (amount > round$1(l.available + ownQty - added)) throw Error("الرصيد المتاح لا يكفي لتجهيز " + l.code);
 		let remaining = amount;
 		for (const r of own) {
 			const take = Math.min(r.remaining, remaining);
-			r.remaining = round(r.remaining - take);
-			remaining = round(remaining - take);
+			r.remaining = round$1(r.remaining - take);
+			remaining = round$1(remaining - take);
 		}
 		const p = {
 			id: "PRE-" + crypto.randomUUID(),
@@ -13988,14 +14164,14 @@ async function inventoryOperation(db, u, b) {
 		for (const line of b.lines) {
 			const l = inv.lots.find((x) => x.id === line.lotId);
 			if (!l) throw Error("الباتش غير موجود");
-			totals.set(l.code, round((totals.get(l.code) || 0) + qty(line.quantity)));
+			totals.set(l.code, round$1((totals.get(l.code) || 0) + qty(line.quantity)));
 		}
 		for (const [code, amount] of totals) {
 			const req = (order.data.requirements || []).find((r) => r.code === code);
 			if (!req) throw Error("أضف احتياج المادة إلى الأمر أولًا: " + code);
 			const actual = d.issues.filter((i) => i.orderId === order.id && i.code === code).reduce((n, i) => n + i.quantity - d.returns.filter((r) => r.issueId === i.id).reduce((v, r) => v + r.quantity, 0), 0);
 			const pending = d.preparations.filter((p) => p.orderId === order.id && p.code === code).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0);
-			if (amount > round(req.quantity - actual - pending)) throw Error("الكمية أكبر من المتبقي للاحتياج " + code + "؛ عدّل الاحتياج إذا لزم");
+			if (amount > round$1(req.quantity - actual - pending)) throw Error("الكمية أكبر من المتبقي للاحتياج " + code + "؛ عدّل الاحتياج إذا لزم");
 		}
 		for (const line of b.lines) prepare(line.lotId, qty(line.quantity));
 		description = "تجهيز احتياجات مخطط الصرف للأمر " + order.number;
@@ -14003,20 +14179,19 @@ async function inventoryOperation(db, u, b) {
 	if (op === "inventory_cancel_prepare") {
 		const p = d.preparations.find((p) => p.id === b.preparationId && p.orderId === order.id);
 		if (!p || p.quantity <= p.received + p.cancelled) throw Error("لا توجد كمية معلقة");
-		p.cancelled = round(p.quantity - p.received);
+		p.cancelled = round$1(p.quantity - p.received);
 		p.cancelledAt = now;
 		p.cancelledBy = u.email;
 		p.reason = required(b.reason, "سبب إلغاء التجهيز");
 		description = "إلغاء متبقي التجهيز للأمر " + order.number;
 	}
 	if (op === "inventory_accept") {
-		const shift = order.data.shifts.find((s) => s.id === b.shiftId && !s.closedAt);
-		if (!shift) throw Error("اختر شفتًا مفتوحًا");
+		const shift = ensureAutoShift(inv, order, u, now);
 		if (b.preparationId) {
 			const p = d.preparations.find((p) => p.id === b.preparationId && p.orderId === order.id);
 			const amount = qty(b.quantity);
 			if (p && order.data.cycleVersion >= 4 && p.unit === "PC" && !Number.isInteger(amount)) throw Error("القطع تستلم بأعداد صحيحة");
-			if (!p || amount > round(p.quantity - p.received - p.cancelled)) throw Error("الاستلام يتجاوز المتبقي أو تم تأكيده بالفعل");
+			if (!p || amount > round$1(p.quantity - p.received - p.cancelled)) throw Error("الاستلام يتجاوز المتبقي أو تم تأكيده بالفعل");
 			const l = inv.lots.find((x) => x.id === p.lotId);
 			if (l) {
 				assertWarehouse(u, l.warehouse);
@@ -14025,7 +14200,7 @@ async function inventoryOperation(db, u, b) {
 				assertProductionLot(order, l);
 			}
 			if (!l || l.quality !== "A" || l.warehousePending || amount > l.balance) throw Error("الباتش غير متاح للاستلام");
-			p.received = round(p.received + amount);
+			p.received = round$1(p.received + amount);
 			d.issues.push({
 				id,
 				number: "GI-" + String(d.issues.length + 1).padStart(7, "0"),
@@ -14066,10 +14241,10 @@ async function inventoryOperation(db, u, b) {
 		const wip = wipRows(inv, order.id).find((r) => r.id === issue.id);
 		if (wip && amount > wip.free) throw Error("المرتجع يتجاوز المتبقي لدى الإنتاج");
 		const returned = d.returns.filter((r) => r.issueId === issue.id).reduce((n, r) => n + r.quantity, 0);
-		if (amount > round(issue.quantity - returned)) throw Error("المرتجع أكبر من المصروف المتبقي");
+		if (amount > round$1(issue.quantity - returned)) throw Error("المرتجع أكبر من المصروف المتبقي");
 		const codeNet = d.issues.filter((i) => i.orderId === order.id && i.code === issue.code).reduce((n, i) => n + i.quantity - d.returns.filter((r) => r.issueId === i.id).reduce((a, r) => a + r.quantity, 0), 0);
 		const waste = (order.data.waste || []).filter((w) => w.code === issue.code).reduce((n, w) => n + w.quantity, 0);
-		if (round(codeNet - amount) < waste) throw Error("المرتجع يتعارض مع كمية هالك معتمدة");
+		if (round$1(codeNet - amount) < waste) throw Error("المرتجع يتعارض مع كمية هالك معتمدة");
 		d.returns.push({
 			id,
 			issueId: issue.id,
@@ -14088,6 +14263,7 @@ async function inventoryOperation(db, u, b) {
 		by: u.email,
 		action: description
 	});
+	tagNewMovements(d, now);
 	const guard = order ? " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND status='open' AND version=?)" : "";
 	const args = order ? [
 		order.id,
@@ -14104,7 +14280,1192 @@ async function inventoryOperation(db, u, b) {
 		inv.version,
 		...args
 	])).changes) throw Error("تعارض تحديث الأرصدة أو الأمر؛ حدّث الصفحة وأعد المحاولة");
-	return { ok: true };
+	return {
+		ok: true,
+		...op === "inventory_transfer_accept" || op === "inventory_opening" && b.warehouse === "PROD" ? await safeAutomaticFilling(db, u, demo) : {}
+	};
+}
+//#endregion
+//#region lib/fast-plan.ts
+var round = (v) => Math.round(v * 1e3) / 1e3;
+var amount = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
+function pendingPreparation(inv, p) {
+	return round(p.quantity - p.received - p.cancelled);
+}
+function remainingRequirement(inv, o, code) {
+	const need = (o.data.requirements || []).find((r) => r.code === code);
+	if (!need) return 0;
+	const issued = (inv.state.issues || []).filter((i) => i.orderId === o.id && i.code === code).reduce((sum, i) => sum + i.quantity - (inv.state.returns || []).filter((r) => r.issueId === i.id).reduce((v, r) => v + r.quantity, 0), 0);
+	return round(Math.max(0, need.quantity - issued));
+}
+function usageProposal(inv, o, output) {
+	if (!inv || !o || !Number.isFinite(output) || output <= 0) return {
+		lines: [],
+		shortages: []
+	};
+	let plan = null;
+	try {
+		plan = packingPlan(o.data.code, output, inv.materials, o.data.packingPolicy || "partial");
+	} catch (e) {
+		throw e;
+	}
+	const wip = wipRows(inv, o.id).filter((r) => r.free > 0), lines = [], shortages = [];
+	for (const r of o.data.requirements || []) {
+		const standard = plan?.inputs.find((p) => p.code === r.code && p.unit === r.unit);
+		let needed = standard && r.source === "BOM" ? standard.quantity : amount(r.quantity) * output / Math.max(1, amount(o.data.target));
+		if (r.unit === "PC") needed = Math.ceil(needed - 1e-9);
+		needed = round(needed);
+		let left = needed;
+		for (const i of wip.filter((i) => i.code === r.code && i.unit === r.unit).sort((a, b) => String(a.acceptedAt || a.at).localeCompare(String(b.acceptedAt || b.at)))) {
+			let quantity = round(Math.min(left, i.free));
+			if (i.unit === "PC") quantity = Math.floor(quantity);
+			if (quantity <= 0) continue;
+			lines.push({
+				issueId: i.id,
+				code: i.code,
+				name: i.name,
+				batch: i.batch,
+				category: i.category,
+				unit: i.unit,
+				quantity,
+				plannedQuantity: quantity,
+				max: i.free
+			});
+			left = round(left - quantity);
+			if (!left) break;
+		}
+		if (left > 0) shortages.push({
+			code: r.code,
+			name: r.name,
+			unit: r.unit,
+			quantity: left
+		});
+	}
+	for (const i of wip) if (!lines.some((l) => l.issueId === i.id)) lines.push({
+		issueId: i.id,
+		code: i.code,
+		name: i.name,
+		batch: i.batch,
+		category: i.category,
+		unit: i.unit,
+		quantity: 0,
+		plannedQuantity: 0,
+		max: i.free
+	});
+	return {
+		lines,
+		shortages
+	};
+}
+//#endregion
+//#region lib/fast-operations.ts
+var stable = (v) => Array.isArray(v) ? v.map(stable) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])])) : v;
+var fingerprint = (b) => JSON.stringify(stable(Object.fromEntries(Object.entries(b).filter(([k]) => ![
+	"idempotencyKey",
+	"inventoryVersion",
+	"orderVersion",
+	"version"
+].includes(k)))));
+function fastKey(b) {
+	if (typeof b.idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{16,100}$/.test(b.idempotencyKey)) throw Error("معرف العملية غير صالح؛ أعد فتح النموذج");
+	return b.idempotencyKey;
+}
+function completedFast(inv, b, u) {
+	const key = fastKey(b), prior = (inv.state.fastOperations || []).find((r) => r.key === key);
+	if (!prior) return null;
+	if (prior.action !== b.action || prior.by !== u.email || prior.fingerprint !== fingerprint(b)) throw Error("معرف العملية مستخدم بطلب مختلف؛ أعد فتح النموذج");
+	return {
+		...prior.result,
+		replayed: true
+	};
+}
+function rememberFast(inv, b, u, result, now) {
+	inv.state.fastOperations ||= [];
+	inv.state.fastOperations.push({
+		key: fastKey(b),
+		action: b.action,
+		by: u.email,
+		at: now,
+		fingerprint: fingerprint(b),
+		result
+	});
+}
+var serial$1 = (prefix, list) => prefix + "-" + String(list.length + 1).padStart(7, "0");
+var blocked = (code) => masterData.conflicts.some((m) => m.code === code) || masterData.retired.some((m) => m.code === code);
+async function groupedInventoryOperation(db, user, b) {
+	const u = operator(user, b.action), role = actualRole(u), prepare = b.action === "inventory_prepare_group";
+	if (!["inventory_prepare_group", "inventory_accept_group"].includes(b.action) || !(prepare ? [
+		"admin",
+		"warehouse",
+		"store_production"
+	] : [
+		"admin",
+		"production",
+		"store_production"
+	]).includes(role)) throw Error("لا توجد صلاحية لهذه الحركة");
+	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), prior = completedFast(inv, b, u);
+	if (prior) return prior;
+	if (!Number.isSafeInteger(b.inventoryVersion) || inv.version !== b.inventoryVersion) throw Error("الأرصدة تغيرت؛ حدّث البيانات وأعد مراجعة المجموعة");
+	const o = inv.orders.find((o) => o.id === b.orderId);
+	if (!o || o.status !== "open" || o.version !== b.orderVersion) throw Error("الأمر مغلق أو تغير؛ أعد مراجعة المجموعة");
+	assertReleased(inv, o);
+	assertScope(inv, u, { lineId: o.data.lineId });
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	assertDayOpen(inv, operatingShift(now).day);
+	if (b.confirm !== true) throw Error("أكد مراجعة المواد والكميات الفعلية");
+	if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 200) throw Error("اختر من بند واحد إلى 200 بند");
+	const keys = b.lines.map((l) => prepare ? l.lotId : l.preparationId || l.lotId);
+	if (keys.some((k) => typeof k !== "string" || !k) || new Set(keys).size !== keys.length) throw Error("لا تكرر نفس بند المادة أو الباتش");
+	const d = inv.state, id = "GROUP-" + crypto.randomUUID(), codeTotals = /* @__PURE__ */ new Map(), lotTotals = /* @__PURE__ */ new Map(), numbers = [], groupItems = [];
+	const own = (lotId) => d.reservations.filter((r) => r.orderId === o.id && r.lotId === lotId && r.remaining > 0);
+	const takeReservations = (lotId, quantity) => {
+		let left = quantity;
+		for (const r of own(lotId)) {
+			const take = Math.min(left, r.remaining);
+			r.remaining = round$1(r.remaining - take);
+			left = round$1(left - take);
+			if (!left) break;
+		}
+	};
+	const rows = b.lines.map((line) => {
+		const p = !prepare && line.preparationId ? d.preparations.find((p) => p.id === line.preparationId && p.orderId === o.id) : null;
+		if (!prepare && line.preparationId && !p) throw Error("التجهيز غير موجود لهذا الأمر");
+		const l = inv.lots.find((l) => l.id === (p?.lotId || line.lotId));
+		if (!l || blocked(l.code) || l.quality !== "A" || l.warehousePending) throw Error("اختر مواد معتمدة ومتاحة للاستلام");
+		assertWarehouse(u, l.warehouse);
+		assertScope(inv, u, { warehouse: l.warehouse });
+		assertUsable(l, dateInCairo(now));
+		assertProductionLot(o, l);
+		const quantity = qty(line.quantity);
+		if (l.unit === "PC" && !Number.isInteger(quantity)) throw Error("عدد القطع يجب أن يكون صحيحًا");
+		if (!(o.data.requirements || []).find((r) => r.code === l.code && r.unit === l.unit)) throw Error("المادة خارج احتياجات الأمر المعتمدة: " + l.code);
+		if (prepare && l.directFruit) throw Error("الثمار تصرف مباشرة من الحوض بمعرفة الإنتاج");
+		if (!prepare && !p && !(l.directFruit && l.category === "raw" && l.warehouse === "PROD" && o.data.type === "Bulk")) throw Error("مواد المخزن تحتاج تجهيزًا قبل تأكيد استلام الإنتاج");
+		if (p && quantity > pendingPreparation(inv, p)) throw Error("الاستلام يتجاوز متبقي التجهيز");
+		const ownQty = own(l.id).reduce((n, r) => n + r.remaining, 0);
+		if ((prepare || !p) && quantity > round$1(l.available + ownQty)) throw Error("الكمية تتجاوز المتاح للباتش " + l.batch);
+		codeTotals.set(l.code, round$1((codeTotals.get(l.code) || 0) + quantity));
+		lotTotals.set(l.id, round$1((lotTotals.get(l.id) || 0) + quantity));
+		return {
+			l,
+			p,
+			quantity
+		};
+	});
+	for (const [code, total] of codeTotals) {
+		const pending = prepare ? d.preparations.filter((p) => p.orderId === o.id && p.code === code).reduce((n, p) => n + Math.max(0, pendingPreparation(inv, p)), 0) : 0;
+		if (total > round$1(remainingRequirement(inv, o, code) - pending)) throw Error("المجموعة تتجاوز متبقي احتياج المادة " + code);
+	}
+	for (const [lotId, total] of lotTotals) if (total > inv.lots.find((l) => l.id === lotId).balance) throw Error("مجموع البنود يتجاوز الرصيد الفعلي للباتش");
+	const shift = ensureAutoShift(inv, o, u, now);
+	assertDayOpen(inv, shift.day);
+	for (const { l } of rows) assertUsable(l, dateInCairo(now));
+	for (const { l, p, quantity } of rows) if (prepare) {
+		takeReservations(l.id, quantity);
+		let left = quantity;
+		const requests = (d.supplyRequests || []).filter((r) => r.orderId === o.id && r.code === l.code && !r.cancelledAt).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+		const pieces = [];
+		for (const r of requests) {
+			const allocated = d.preparations.filter((p) => p.supplyRequestId === r.id).reduce((n, p) => n + p.quantity - p.cancelled, 0), q = round$1(Math.min(left, Math.max(0, r.quantity - allocated)));
+			if (q > 0) {
+				pieces.push({
+					quantity: q,
+					supplyRequestId: r.id
+				});
+				left = round$1(left - q);
+			}
+			if (!left) break;
+		}
+		if (left > 0) pieces.push({
+			quantity: left,
+			supplyRequestId: null
+		});
+		for (const piece of pieces) {
+			const preparation = {
+				id: "PRE-" + crypto.randomUUID(),
+				requestId: id,
+				groupKey: fastKey(b),
+				orderId: o.id,
+				lotId: l.id,
+				code: l.code,
+				name: l.name,
+				category: l.category,
+				unit: l.unit,
+				warehouse: l.warehouse,
+				batch: l.batch,
+				received: 0,
+				cancelled: 0,
+				sourceOrderId: l.orderId || null,
+				sourceReference: l.source,
+				at: now,
+				by: u.email,
+				...piece
+			};
+			d.preparations.push(preparation);
+			groupItems.push(preparation.id);
+		}
+	} else {
+		if (p) p.received = round$1(p.received + quantity);
+		else takeReservations(l.id, quantity);
+		const number = serial$1("GI", d.issues);
+		numbers.push(number);
+		d.issues.push({
+			id: "ISS-" + crypto.randomUUID(),
+			number,
+			groupId: id,
+			groupKey: fastKey(b),
+			orderId: o.id,
+			lotId: l.id,
+			code: l.code,
+			name: l.name,
+			category: l.category,
+			unit: l.unit,
+			warehouse: l.warehouse,
+			batch: l.batch,
+			quantity,
+			at: now,
+			by: u.email,
+			acceptedAt: now,
+			acceptedBy: u.email,
+			shiftId: shift.id,
+			day: shift.day,
+			preparationId: p?.id || null,
+			directFruit: !p && l.directFruit === true,
+			sourceOrderId: l.orderId || null,
+			sourceReference: l.source,
+			notes: String(b.notes || "").slice(0, 160)
+		});
+	}
+	const result = {
+		ok: true,
+		orderId: o.id,
+		groupId: id,
+		numbers,
+		preparationIds: groupItems
+	};
+	rememberFast(inv, b, u, result, now);
+	d.history.push({
+		id,
+		at: now,
+		by: u.email,
+		action: prepare ? "تجهيز مجموعة مواد للأمر " + o.number : "استلام وصرف مجموعة مواد للأمر " + o.number
+	});
+	tagNewMovements(d, now);
+	const guard = " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND status='open' AND version=?)", args = [
+		o.id,
+		demo,
+		o.version
+	];
+	if (!(inv.version === 0 ? await db.run("INSERT OR IGNORE INTO inventory(id,version,data) SELECT ?,1,? WHERE 1=1" + guard, [
+		demo,
+		JSON.stringify(d),
+		...args
+	]) : await db.run("UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=?" + guard, [
+		JSON.stringify(d),
+		demo,
+		inv.version,
+		...args
+	])).changes) {
+		const retry = completedFast(await inventorySnapshot(db, demo), b, u);
+		if (retry) return retry;
+		throw Error("تعارض تحديث المجموعة؛ حدّث البيانات وأعد المراجعة");
+	}
+	return result;
+}
+function applyOutputUsage(inv, o, c, b, u, now) {
+	assertDayOpen(inv, c.day);
+	if (b.confirmUsage !== true) throw Error("أكد الناتج والاستهلاك الفعلي معًا");
+	if (c.kind !== "main") throw Error("التسجيل المجمع متاح للناتج الأساسي؛ استخدم شاشة النواتج الجانبية");
+	if (!Array.isArray(b.usageRows) || !b.usageRows.length || b.usageRows.length > 200 || new Set(b.usageRows.map((r) => r.issueId)).size !== b.usageRows.length) throw Error("راجع بنود الاستهلاك دون تكرار حركة صرف");
+	const proposal = usageProposal(inv, o, c.quantity), expected = /* @__PURE__ */ new Map(), actual = /* @__PURE__ */ new Map(), wip = wipRows(inv, o.id);
+	for (const r of proposal.lines) expected.set(r.code, round$1((expected.get(r.code) || 0) + r.plannedQuantity));
+	for (const r of proposal.shortages) expected.set(r.code, round$1((expected.get(r.code) || 0) + r.quantity));
+	const rows = b.usageRows.map((r) => {
+		const i = wip.find((i) => i.id === r.issueId);
+		if (!i || blocked(i.code)) throw Error("اختر مواد مستلمة لنفس الأمر");
+		const quantity = qty(r.quantity);
+		if (quantity > i.free) throw Error("الاستهلاك يتجاوز المتبقي لدى الإنتاج: " + i.code);
+		if (i.unit === "PC" && !Number.isInteger(quantity)) throw Error("عدد العبوات المستهلكة يجب أن يكون صحيحًا");
+		if (!(o.data.requirements || []).some((need) => need.code === i.code && need.unit === i.unit)) throw Error("الاستهلاك خارج احتياجات الأمر المعتمدة");
+		actual.set(i.code, round$1((actual.get(i.code) || 0) + quantity));
+		return {
+			i,
+			quantity
+		};
+	});
+	const basic = o.data.type === "Filling" ? "semi" : "raw", basicRows = rows.filter((r) => r.i.category === basic);
+	if (!basicRows.length) throw Error("حدد الاستهلاك الفعلي للخامة الأساسية");
+	if (c.unit === "KG" && basicRows.filter((r) => r.i.unit === "KG").reduce((n, r) => n + r.quantity, 0) + 1e-4 < c.quantity) throw Error("كمية الناتج تتجاوز الاستهلاك الفعلي للخامة الأساسية");
+	if (o.data.type === "Filling" && !rows.some((r) => r.i.category === "packaging")) throw Error("حدد مواد التعبئة المستخدمة في الباتش");
+	const codes = [...new Set([...expected.keys(), ...actual.keys()])], deviated = codes.some((code) => Math.abs((expected.get(code) || 0) - (actual.get(code) || 0)) > 1e-4), reason = deviated ? required(b.deviationReason, "سبب اختلاف الاستهلاك الفعلي عن المقترح") : String(b.deviationReason || "").trim().slice(0, 160);
+	const d = inv.state, outputLotId = "P-" + o.id + "-" + c.id;
+	for (const { i, quantity } of rows) {
+		const id = "USE-" + crypto.randomUUID(), common = {
+			id,
+			orderId: o.id,
+			issueId: i.id,
+			code: i.code,
+			name: i.name,
+			unit: i.unit,
+			quantity,
+			outputLotId,
+			shiftId: c.shiftId,
+			day: c.day,
+			at: now,
+			by: u.email,
+			groupKey: fastKey(b),
+			source: "confirmed-output-usage"
+		};
+		if (i.category === "packaging") {
+			const m = inv.materials.find((m) => m.code === i.code);
+			d.packs.push({
+				...common,
+				returnable: Boolean(m?.returnable),
+				sourceBatch: i.batch,
+				sourceLotId: i.lotId
+			});
+		} else {
+			d.consumptions.push({
+				...common,
+				reason: reason || "استهلاك مؤكد مع الناتج " + c.id
+			});
+			controls(d).trace.push({
+				id: "TRACE-" + crypto.randomUUID(),
+				at: now,
+				by: u.email,
+				consumptionId: id,
+				issueId: i.id,
+				orderId: o.id,
+				outputLotId,
+				code: i.code,
+				quantity
+			});
+		}
+	}
+	if (b.weights) {
+		if (o.data.type !== "Filling" || c.unit !== "KG") throw Error("أوزان العبوات متاحة للمنتج المعبأ بالكيلوجرام");
+		const count = Number(b.weights.count), gross = qty(b.weights.gross), tare = qty(b.weights.tare);
+		if (!Number.isSafeInteger(count) || count <= 0 || count > 1e5 || round$1(gross - tare) !== c.quantity) throw Error("راجع عدد العبوات وأوزانها لتطابق كمية الناتج");
+		o.data.weights ||= [];
+		o.data.weights.push({
+			id: "WT-" + (o.data.weights.length + 1),
+			confirmationId: c.id,
+			count,
+			gross,
+			tare,
+			net: c.quantity,
+			shiftId: c.shiftId,
+			day: c.day,
+			notes: String(b.notes || "").slice(0, 160),
+			at: now,
+			by: u.email
+		});
+	}
+	c.usageSummary = {
+		confirmed: true,
+		by: u.email,
+		at: now,
+		deviated,
+		reason,
+		quantities: codes.map((code) => ({
+			code,
+			planned: expected.get(code) || 0,
+			actual: actual.get(code) || 0
+		}))
+	};
+	return {
+		outputLotId,
+		usageCount: rows.length
+	};
+}
+async function commitOutputUsage(db, inv, o, b, u, now) {
+	if (!db.batch) throw Error("التسجيل المجمع يحتاج تحديث خادم البرنامج");
+	const c = o.data.confirmations[o.data.confirmations.length - 1], result = {
+		ok: true,
+		orderId: o.id,
+		confirmationId: c.id,
+		batch: c.batch,
+		outputLotId: "P-" + o.id + "-" + c.id
+	};
+	o.data.lastFastOutputKey = fastKey(b);
+	rememberFast(inv, b, u, result, now);
+	tagNewMovements(inv.state, now);
+	const orderSql = "UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND demo=? AND status='open' AND version=? AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=?";
+	const orderArgs = [
+		JSON.stringify(o.data),
+		"open",
+		o.id,
+		o.demo,
+		o.version,
+		o.demo,
+		inv.version
+	];
+	const guard = " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=? AND json_extract(data,'$.lastFastOutputKey')=?)", args = [
+		o.id,
+		o.demo,
+		o.version + 1,
+		fastKey(b)
+	];
+	const inventorySql = inv.version === 0 ? "INSERT OR IGNORE INTO inventory(id,version,data) SELECT ?,1,? WHERE 1=1" + guard : "UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=?" + guard;
+	const inventoryArgs = inv.version === 0 ? [
+		o.demo,
+		JSON.stringify(inv.state),
+		...args
+	] : [
+		JSON.stringify(inv.state),
+		o.demo,
+		inv.version,
+		...args
+	];
+	const saved = await db.batch([{
+		sql: orderSql,
+		args: orderArgs
+	}, {
+		sql: inventorySql,
+		args: inventoryArgs
+	}]);
+	if (saved.length !== 2 || saved.some((r) => r.changes !== 1)) {
+		const prior = completedFast(await inventorySnapshot(db, o.demo), b, u);
+		if (prior) return prior;
+		throw Error("تغير الأمر أو المخزون؛ أعد مراجعة الناتج والاستهلاك");
+	}
+	return result;
+}
+//#endregion
+//#region lib/auto-filling-plan.ts
+function automaticFillingCandidates(materials, bulkCode) {
+	return materials.filter((m) => m.category === "finished" && !masterData.conflicts.some((x) => x.code === m.code) && !masterData.retired.some((x) => x.code === m.code)).filter((m) => {
+		const recipe = masterData.boms.find((r) => r.code === m.code);
+		if (!recipe || recipe.unit !== m.unit) return false;
+		const semi = recipe.lines.filter((l) => l.quantity > 0 && !l.coproduct && materials.find((m) => m.code === l.code)?.category === "semi");
+		return semi.length > 0 && semi.every((l) => l.code === bulkCode) && semi.some((l) => l.code === bulkCode);
+	});
+}
+function automaticFillingPlan(materials, bulkCode, sourceQuantity, finishedCode, policy = "partial") {
+	const finished = automaticFillingCandidates(materials, bulkCode).find((m) => m.code === finishedCode), source = materials.find((m) => m.code === bulkCode), recipe = masterData.boms.find((r) => r.code === finishedCode);
+	if (!finished || !source || !recipe) throw Error("اختر منتجًا معبأ له مخطط صرف مرتبط بكود البلك");
+	if (!["partial", "full"].includes(policy) || !Number.isFinite(sourceQuantity) || sourceQuantity <= 0) throw Error("راجع كمية وسياسة التعبئة التلقائية");
+	const amount = recipe.lines.filter((l) => l.code === bulkCode && l.quantity > 0 && !l.coproduct).reduce((n, l) => {
+		if (l.unit === source.unit) return n + l.quantity;
+		if (l.unit === "G" && source.unit === "KG") return n + l.quantity / 1e3;
+		throw Error("وحدة البلك لا تطابق مخطط التعبئة");
+	}, 0);
+	const rawTarget = sourceQuantity * recipe.base / amount;
+	let target = finished.unit === "PC" ? Math.floor(rawTarget + 1e-8) : Math.floor(rawTarget * 1e3 + 1e-7) / 1e3;
+	if (policy === "full") {
+		const partial = packingPlan(finishedCode, target, materials, "partial");
+		if (partial?.packing) {
+			target = Math.floor(target / partial.packing.nominalWeight + 1e-9) * partial.packing.nominalWeight;
+			target = Math.round(target * 1e3) / 1e3;
+			if (target <= 0) throw Error("كمية البلك لا تكفي لعبوة كاملة؛ اختر السماح بعبوة جزئية");
+		}
+	}
+	const plan = packingPlan(finishedCode, target, materials, policy);
+	if (!plan || plan.inputs.some((r) => r.quantity <= 0)) throw Error("مخطط صرف التعبئة غير متاح");
+	if (plan.inputs.some((r) => masterData.conflicts.some((m) => m.code === r.code) || masterData.retired.some((m) => m.code === r.code) || materials.find((m) => m.code === r.code)?.phantom)) throw Error("مخطط التعبئة يحتوي صنفًا معلقًا أو افتراضيًا؛ راجع البيانات الأساسية");
+	return {
+		finished,
+		target,
+		plan,
+		bulkRequired: plan.inputs.find((r) => r.code === bulkCode).quantity
+	};
+}
+//#endregion
+//#region lib/auto-filling.ts
+var jobs = (state) => state.automaticFillingJobs ||= [];
+var serial = (prefix, rows) => prefix + "-" + String(rows.length + 1).padStart(7, "0");
+function prepareAutomaticFilling(inv, parent, c, b, u, now) {
+	if (b.autoFilling !== true) return null;
+	if (parent.data.type !== "Bulk" || c.kind !== "main") throw Error("التعبئة التلقائية تبدأ من ناتج البلك الأساسي فقط");
+	const key = "AF-" + parent.id + "-" + c.id;
+	if (jobs(inv.state).some((j) => j.key === key)) throw Error("يوجد أمر تعبئة تلقائي لهذا الناتج بالفعل");
+	const code = String(b.fillingCode || "").trim(), policy = b.fillingPolicy || "partial";
+	if (!["partial", "full"].includes(policy)) throw Error("اختر سياسة العبوات");
+	const configured = code ? automaticFillingPlan(inv.materials, parent.data.code, c.quantity, code, policy) : null;
+	const job = {
+		key,
+		parentOrderId: parent.id,
+		confirmationId: c.id,
+		sourceLotId: "P-" + parent.id + "-" + c.id,
+		bulkCode: parent.data.code,
+		sourceQuantity: c.quantity,
+		finishedCode: code,
+		packingPolicy: policy,
+		status: "waiting_quality",
+		shortages: [],
+		at: now,
+		by: u.email,
+		authorizationRole: actualRole(u),
+		lineId: parent.data.lineId
+	};
+	jobs(inv.state).push(job);
+	c.automaticFillingKey = key;
+	c.plannedFillingCode = code;
+	if (code) parent.data.automaticFillingDefaults = {
+		code,
+		policy
+	};
+	const clock = operatingShift(now);
+	return {
+		job,
+		data: {
+			cycleVersion: 4,
+			type: "Filling",
+			processType: "PI02",
+			lineId: parent.data.lineId,
+			costCentre: parent.data.costCentre || "",
+			lineDailyRate: parent.data.lineDailyRate ?? 127,
+			code: configured?.finished.code || "",
+			name: configured?.finished.name || "أمر تعبئة تلقائي — بانتظار اعتماد البلك",
+			unit: configured?.finished.unit || c.unit || "KG",
+			target: configured?.target || c.quantity,
+			warehouse: "FG",
+			from: clock.day,
+			to: clock.day,
+			packingPolicy: policy,
+			bom: configured?.plan || null,
+			requirements: configured?.plan.inputs || [],
+			sourceLotId: job.sourceLotId,
+			sourceOriginLotId: job.sourceLotId,
+			sourceOrderId: parent.id,
+			sourceBatch: c.batch,
+			sourceColor: "",
+			sourceGrade: "",
+			createdAt: now,
+			createdBy: u.email,
+			creationShift: shiftMetadata(now),
+			automaticFilling: {
+				key,
+				sourceQuantity: c.quantity
+			},
+			notes: "أمر تعبئة مولد تلقائيًا من ناتج البلك",
+			receipts: [],
+			shifts: [],
+			packaging: [],
+			confirmations: [],
+			waste: [],
+			history: [{
+				at: now,
+				by: u.email,
+				action: "إنشاء مسودة تعبئة تلقائية من البلك",
+				...shiftMetadata(now)
+			}]
+		}
+	};
+}
+async function commitAutomaticOutput(db, inv, parent, draft, result, now, request, actor) {
+	if (!db.batch) throw Error("التعبئة التلقائية تحتاج تحديث خادم البرنامج");
+	const mutation = crypto.randomUUID(), key = draft.job.key;
+	parent.data.lastAutomaticFillingMutation = mutation;
+	const parentSql = "UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND demo=? AND version=? AND status='open' AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=? AND NOT EXISTS (SELECT 1 FROM production_orders WHERE demo=? AND json_extract(data,'$.automaticFilling.key')=?)";
+	const parentArgs = [
+		JSON.stringify(parent.data),
+		parent.status,
+		parent.id,
+		parent.demo,
+		parent.version,
+		parent.demo,
+		inv.version,
+		parent.demo,
+		key
+	];
+	const guard = "EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=? AND json_extract(data,'$.lastAutomaticFillingMutation')=?)", args = [
+		parent.id,
+		parent.demo,
+		parent.version + 1,
+		mutation
+	];
+	const childSql = "INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?,'$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number','FO-' || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')='Filling' HAVING " + guard + " AND NOT EXISTS (SELECT 1 FROM production_orders WHERE demo=? AND json_extract(data,'$.automaticFilling.key')=?)";
+	const childArgs = [
+		parent.demo,
+		JSON.stringify(draft.data),
+		...args,
+		parent.demo,
+		key
+	];
+	const childGuard = guard + " AND EXISTS (SELECT 1 FROM production_orders WHERE demo=? AND json_extract(data,'$.automaticFilling.key')=?)", allArgs = [
+		...args,
+		parent.demo,
+		key
+	];
+	const inventorySql = inv.version === 0 ? "INSERT INTO inventory(id,version,data) SELECT ?,1,? WHERE " + childGuard + " ON CONFLICT(id) DO UPDATE SET data=excluded.data,version=inventory.version+1 WHERE inventory.version=0" : "UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=? AND " + childGuard;
+	const inventoryArgs = inv.version === 0 ? [
+		parent.demo,
+		JSON.stringify(inv.state),
+		...allArgs
+	] : [
+		JSON.stringify(inv.state),
+		parent.demo,
+		inv.version,
+		...allArgs
+	];
+	const saved = await db.batch([
+		{
+			sql: parentSql,
+			args: parentArgs
+		},
+		{
+			sql: childSql,
+			args: childArgs
+		},
+		{
+			sql: inventorySql,
+			args: inventoryArgs
+		}
+	]);
+	if (saved.length !== 3 || saved.some((r) => r.changes !== 1)) {
+		const current = await inventorySnapshot(db, parent.demo), prior = result.operationKey ? completedFast(current, request, actor) : null;
+		if (prior) return prior;
+		throw Error("تغير الأمر أو المخزون؛ أعد مراجعة الناتج والتعبئة");
+	}
+	const child = await db.first("SELECT id,data FROM production_orders WHERE demo=? AND json_extract(data,'$.automaticFilling.key')=?", [parent.demo, key]);
+	return {
+		...result,
+		fillingOrderId: child?.id,
+		fillingOrderNumber: child ? JSON.parse(child.data).number : "",
+		automaticFillingKey: key
+	};
+}
+async function saveJob(db, inv, child, parent, now) {
+	if (!db.batch) throw Error("التعبئة التلقائية تحتاج تحديث خادم البرنامج");
+	const mutation = crypto.randomUUID();
+	child.data.lastAutomaticFillingMutation = mutation;
+	const sql = "UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND demo=? AND version=? AND status='open' AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=? AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=?)";
+	const args = [
+		JSON.stringify(child.data),
+		child.status,
+		child.id,
+		child.demo,
+		child.version,
+		child.demo,
+		inv.version,
+		parent.id,
+		child.demo,
+		parent.version
+	];
+	const guard = "EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=? AND json_extract(data,'$.lastAutomaticFillingMutation')=?)", g = [
+		child.id,
+		child.demo,
+		child.version + 1,
+		mutation
+	];
+	const update = "UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=? AND " + guard;
+	const saved = await db.batch([{
+		sql,
+		args
+	}, {
+		sql: update,
+		args: [
+			JSON.stringify(inv.state),
+			child.demo,
+			inv.version,
+			...g
+		]
+	}]);
+	return saved.length === 2 && saved.every((r) => r.changes === 1);
+}
+function setJob(job, status, detail = "", shortages = []) {
+	Object.assign(job, {
+		status,
+		detail,
+		shortages
+	});
+}
+function planAllocations(inv, child, source) {
+	const lines = [], shortages = [], own = (lotId) => inv.state.reservations.filter((r) => r.orderId === child.id && r.lotId === lotId && r.remaining > 0).reduce((n, r) => n + r.remaining, 0);
+	const all = inv.lots.filter((l) => l.quality === "A" && !l.warehousePending && !l.expired), available = new Map(all.map((l) => [l.id, round$1(l.available + own(l.id))]));
+	for (const need of child.data.requirements) {
+		let left = need.quantity;
+		const semi = inv.materials.find((m) => m.code === need.code)?.category === "semi";
+		const choices = all.filter((l) => l.code === need.code && l.unit === need.unit && (semi ? l.id === source.id || (l.originLotId || l.id) === source.id : l.warehouse === "PROD")).sort((a, b) => (a.warehouse === "PROD" ? 0 : 1) - (b.warehouse === "PROD" ? 0 : 1) || String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)) || a.id.localeCompare(b.id));
+		for (const lot of choices) {
+			let quantity = round$1(Math.min(left, available.get(lot.id) || 0));
+			if (lot.unit === "PC") quantity = Math.floor(quantity);
+			if (quantity <= 0) continue;
+			lines.push({
+				lot,
+				quantity
+			});
+			available.set(lot.id, round$1((available.get(lot.id) || 0) - quantity));
+			left = round$1(left - quantity);
+			if (!left) break;
+		}
+		if (left > 0) shortages.push({
+			code: need.code,
+			name: need.name,
+			unit: need.unit,
+			quantity: left
+		});
+	}
+	return {
+		lines,
+		shortages
+	};
+}
+async function runAutomaticFilling(db, demo, key, trigger) {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const inv = await inventorySnapshot(db, demo), job = jobs(inv.state).find((j) => j.key === key);
+		if (!job || [
+			"completed",
+			"cancelled",
+			"rejected"
+		].includes(job.status)) return job || null;
+		const child = inv.orders.find((o) => o.data.automaticFilling?.key === key), parent = inv.orders.find((o) => o.id === job.parentOrderId), source = inv.lots.find((l) => l.id === job.sourceLotId);
+		if (!child || !parent || !source) return job;
+		if (child.status !== "open") return {
+			...job,
+			status: "blocked",
+			detail: "أمر التعبئة مغلق"
+		};
+		const now = (/* @__PURE__ */ new Date()).toISOString(), before = JSON.stringify({
+			job,
+			data: child.data
+		}), state = inv.state;
+		let execute = false, mutationStarted = false;
+		if (source.quality === "R") {
+			setJob(job, "rejected");
+			child.status = "closed";
+			child.data.cancelledAt = now;
+			child.data.cancelReason = "رفض البلك المصدر بواسطة الجودة";
+		} else if (source.quality !== "A" || !source.color || !source.grade) setJob(job, "waiting_quality");
+		else {
+			const options = automaticFillingCandidates(inv.materials, job.bulkCode).filter((m) => Array.isArray(source.allowedFinishedCodes) && source.allowedFinishedCodes.includes(m.code));
+			let code = job.finishedCode;
+			if (!options.some((m) => m.code === code)) code = options.length === 1 ? options[0].code : "";
+			if (!code) setJob(job, "choose_product");
+			else if (state.issues.some((i) => i.orderId === child.id) || state.preparations.some((p) => p.orderId === child.id && p.quantity > p.cancelled) || (child.data.confirmations || []).length > 0 || (child.data.requirementChanges || []).length || child.data.requirements.some((r) => r.source !== "BOM")) setJob(job, "manual_review");
+			else try {
+				const planned = automaticFillingPlan(inv.materials, job.bulkCode, job.sourceQuantity, code, job.packingPolicy);
+				job.finishedCode = code;
+				child.data = {
+					...child.data,
+					code,
+					name: planned.finished.name,
+					unit: planned.finished.unit,
+					target: planned.target,
+					bom: planned.plan,
+					requirements: planned.plan.inputs,
+					sourceColor: source.color,
+					sourceGrade: source.grade
+				};
+				if (source.warehousePending) setJob(job, "waiting_warehouse");
+				else {
+					assertDayOpen(inv, operatingShift(now).day);
+					assertUsable(source, dateInCairo(now));
+					assertLineReady(inv, child);
+					assertScope(inv, {
+						email: job.by,
+						role: job.authorizationRole
+					}, {
+						lineId: child.data.lineId,
+						warehouse: "PROD"
+					});
+					if (!isReleased(inv, parent)) throw Error("أمر البلك المصدر غير معتمد للتنفيذ");
+					if ((child.data.requirementChanges || []).length || child.data.requirements.some((r) => r.source !== "BOM")) throw Error("توجد تعديلات على مخطط الصرف تحتاج مراجعة");
+					const allocation = planAllocations(inv, child, source);
+					if (allocation.shortages.length) setJob(job, "shortage", "", allocation.shortages);
+					else {
+						const clock = operatingShift(now);
+						if (child.data.shifts.some((s) => s.id === clock.id && s.closedAt)) throw Error("الشيفت الحالي مغلق على أمر التعبئة");
+						mutationStarted = true;
+						child.data.from = clock.day;
+						child.data.to = clock.day;
+						ensureAutoShift(inv, child, {
+							email: job.by,
+							role: job.authorizationRole
+						}, now);
+						const control = controls(state);
+						if (!isReleased(inv, child)) control.releases.push({
+							id: "AF-REL-" + crypto.randomUUID(),
+							orderId: child.id,
+							decision: "A",
+							automaticFillingKey: key,
+							sourceOrderId: parent.id,
+							sourceConfirmationId: job.confirmationId,
+							by: job.by,
+							at: now,
+							executedBy: trigger.email,
+							reason: "إطلاق تلقائي مشتق من أمر البلك المعتمد",
+							...shiftMetadata(now)
+						});
+						for (const line of allocation.lines) {
+							let lot = line.lot;
+							assertUsable(lot, dateInCairo(now));
+							let left = line.quantity;
+							for (const r of state.reservations.filter((r) => r.orderId === child.id && r.lotId === lot.id && r.remaining > 0)) {
+								const take = Math.min(left, r.remaining);
+								r.remaining = round$1(r.remaining - take);
+								left = round$1(left - take);
+								if (!left) break;
+							}
+							if (lot.warehouse !== "PROD") {
+								const id = "AFTR-" + crypto.randomUUID(), number = serial("TR", state.transfers), material = {
+									code: lot.code,
+									name: lot.name,
+									category: lot.category,
+									unit: lot.unit,
+									batch: lot.batch,
+									quality: lot.quality,
+									color: lot.color,
+									grade: lot.grade,
+									allowedFinishedCodes: lot.allowedFinishedCodes,
+									expiryDate: lot.expiryDate,
+									orderId: parent.id
+								};
+								state.transfers.push({
+									id,
+									number,
+									sourceLotId: lot.id,
+									originLotId: source.id,
+									material,
+									code: lot.code,
+									name: lot.name,
+									unit: lot.unit,
+									batch: lot.batch,
+									quantity: line.quantity,
+									fromWarehouse: lot.warehouse,
+									toWarehouse: "PROD",
+									at: now,
+									by: job.by,
+									receivedAt: now,
+									receivedBy: job.by,
+									executedBy: trigger.email,
+									automaticFillingKey: key,
+									reason: "تحويل البلك المعتمد للتعبئة التلقائية",
+									...shiftMetadata(now)
+								});
+								lot = {
+									...lot,
+									id: "TR-" + id,
+									warehouse: "PROD",
+									originLotId: source.id
+								};
+							}
+							state.issues.push({
+								id: "AFI-" + crypto.randomUUID(),
+								number: serial("GI", state.issues),
+								orderId: child.id,
+								lotId: lot.id,
+								code: lot.code,
+								name: lot.name,
+								category: lot.category,
+								unit: lot.unit,
+								warehouse: "PROD",
+								batch: lot.batch,
+								quantity: line.quantity,
+								at: now,
+								by: job.by,
+								acceptedAt: now,
+								acceptedBy: job.by,
+								executedBy: trigger.email,
+								...shiftMetadata(now),
+								automaticFillingKey: key,
+								sourceOrderId: lot.category === "semi" ? parent.id : lot.orderId || null,
+								sourceReference: lot.category === "semi" ? source.source : lot.source,
+								notes: "صرف تلقائي حسب مخطط التعبئة"
+							});
+						}
+						setJob(job, "completed");
+						job.executedAt = now;
+						job.executedBy = trigger.email;
+						job.issueNumbers = state.issues.filter((i) => i.automaticFillingKey === key).map((i) => i.number);
+						execute = true;
+					}
+				}
+			} catch (error) {
+				if (mutationStarted) throw error;
+				setJob(job, "blocked", error.message);
+			}
+		}
+		if (before === JSON.stringify({
+			job,
+			data: child.data
+		})) return job;
+		job.updatedAt = now;
+		job.updatedBy = trigger.email;
+		child.data.history.push({
+			at: now,
+			by: trigger.email,
+			action: execute ? "الصرف التلقائي لمواد أمر التعبئة" : "تحديث حالة التعبئة التلقائية",
+			automaticFillingKey: key,
+			status: job.status,
+			...shiftMetadata(now)
+		});
+		state.history.push({
+			id: "AFH-" + crypto.randomUUID(),
+			at: now,
+			by: trigger.email,
+			action: execute ? "الصرف التلقائي لمواد أمر التعبئة" : "تحديث حالة التعبئة التلقائية",
+			orderId: child.id,
+			automaticFillingKey: key,
+			status: job.status,
+			...shiftMetadata(now)
+		});
+		if (await saveJob(db, inv, child, parent, now)) return {
+			...job,
+			orderId: child.id,
+			orderNumber: child.number
+		};
+	}
+	throw Error("تعارض تحديث التعبئة التلقائية؛ أعد المحاولة");
+}
+async function processAutomaticFilling(db, trigger, demo, event = {}) {
+	const queue = jobs((await inventorySnapshot(db, demo)).state).filter((j) => ![
+		"completed",
+		"cancelled",
+		"rejected"
+	].includes(j.status) && (!event.parentOrderId || j.parentOrderId === event.parentOrderId) && (!event.sourceLotId || j.sourceLotId === event.sourceLotId) && (!event.key || j.key === event.key));
+	const results = [];
+	for (const job of queue) results.push(await runAutomaticFilling(db, demo, job.key, trigger));
+	return results;
+}
+async function safeAutomaticFilling(db, trigger, demo, event = {}) {
+	try {
+		return { automaticFilling: await processAutomaticFilling(db, trigger, demo, event) };
+	} catch {
+		return { automaticFillingPending: true };
+	}
+}
+async function automaticFillingOperation(db, u, b) {
+	if (!["admin", "production"].includes(actualRole(u))) throw Error("متابعة وتعديل التعبئة التلقائية من صلاحية الإنتاج");
+	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), child = inv.orders.find((o) => o.id === b.orderId), job = jobs(inv.state).find((j) => j.key === child?.data.automaticFilling?.key);
+	if (!child || child.status !== "open" || !job) throw Error("أمر التعبئة التلقائي غير متاح");
+	assertScope(inv, u, { lineId: child.data.lineId });
+	if (b.inventoryVersion !== inv.version || b.version !== child.version) throw Error("تغير الأمر أو المخزون؛ حدّث البيانات");
+	if (b.action === "auto_filling_cancel") {
+		if (job.status === "completed" || inv.state.issues.some((i) => i.orderId === child.id) || inv.state.reservations.some((r) => r.orderId === child.id && r.remaining > 0) || inv.state.preparations.some((p) => p.orderId === child.id && p.quantity > p.cancelled)) throw Error("لا يمكن إلغاء المسودة بعد بدء صرف المواد أو حجزها");
+		const now = (/* @__PURE__ */ new Date()).toISOString(), parent = inv.orders.find((o) => o.id === job.parentOrderId), reason = required(b.reason, "سبب إلغاء مسودة التعبئة");
+		setJob(job, "cancelled", reason);
+		job.updatedAt = now;
+		job.updatedBy = u.email;
+		child.status = "closed";
+		child.data.cancelledAt = now;
+		child.data.cancelReason = reason;
+		child.data.history.push({
+			at: now,
+			by: u.email,
+			action: "إلغاء مسودة التعبئة التلقائية",
+			reason,
+			...shiftMetadata(now)
+		});
+		inv.state.history.push({
+			at: now,
+			by: u.email,
+			action: "إلغاء مسودة التعبئة التلقائية",
+			orderId: child.id,
+			reason,
+			...shiftMetadata(now)
+		});
+		if (!parent || !await saveJob(db, inv, child, parent, now)) throw Error("تعارض تحديث التعبئة التلقائية؛ أعد المحاولة");
+		return {
+			ok: true,
+			automaticFilling: [job]
+		};
+	}
+	if (b.action === "auto_filling_choose") {
+		if (job.status === "completed" || inv.state.issues.some((i) => i.orderId === child.id) || inv.state.reservations.some((r) => r.orderId === child.id && r.remaining > 0) || inv.state.preparations.some((p) => p.orderId === child.id && p.quantity > p.cancelled)) throw Error("لا يمكن تغيير المنتج بعد بدء صرف المواد أو حجزها");
+		const source = inv.lots.find((l) => l.id === job.sourceLotId), code = required(b.code, "المنتج المعبأ المعتمد");
+		if (!source || source.quality !== "A" || !source.allowedFinishedCodes?.includes(code)) throw Error("اختر منتجًا معبأ اعتمدته جودة هذا البلك");
+		automaticFillingPlan(inv.materials, job.bulkCode, job.sourceQuantity, code, job.packingPolicy);
+		job.finishedCode = code;
+		const parent = inv.orders.find((o) => o.id === job.parentOrderId);
+		job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+		job.updatedBy = u.email;
+		inv.state.history.push({
+			at: job.updatedAt,
+			by: u.email,
+			action: "تحديد منتج التعبئة التلقائية",
+			orderId: child.id,
+			code,
+			...shiftMetadata(job.updatedAt)
+		});
+		if (!parent || !await saveJob(db, inv, child, parent, job.updatedAt)) throw Error("تعارض تحديث التعبئة التلقائية؛ أعد المحاولة");
+	} else if (b.action !== "auto_filling_retry") throw Error("إجراء تعبئة تلقائية غير معروف");
+	return {
+		ok: true,
+		automaticFilling: await processAutomaticFilling(db, u, demo, { key: job.key })
+	};
+}
+//#endregion
+//#region lib/fruit-completion.ts
+var replay = (row, u, b) => {
+	if (!row || row.status !== "done" || row.version !== b.version + 1) return null;
+	const data = JSON.parse(row.data), receipt = data.fruitReceipt;
+	return receipt?.schemaVersion === 7 && receipt.postedBy === u.email && Number(b.empty) === data.empty ? {
+		ok: true,
+		replayed: true,
+		receipt
+	} : null;
+};
+async function completeFruitReceipt(db, u, b) {
+	if (!["admin", "scale"].includes(u.role)) throw Error("لا توجد صلاحية لتسجيل الوزن الفارغ");
+	if (!Number.isSafeInteger(b.id) || !Number.isSafeInteger(b.version)) throw Error("رقم تذكرة غير صالح");
+	const row = await db.first("SELECT * FROM tickets WHERE id=?", [b.id]);
+	const prior = replay(row, u, b);
+	if (prior) return prior;
+	if (!row || row.version !== b.version) throw Error("تم تحديث التذكرة؛ أعد فتحها");
+	const now = (/* @__PURE__ */ new Date()).toISOString(), original = JSON.parse(row.data), d = transition({
+		...row,
+		data: original
+	}, "empty", b, u.role, now).data;
+	if (Math.abs(round$1(d.net) - d.net) > 1e-6) throw Error("الأوزان تسجل بحد أقصى 3 أرقام عشرية");
+	if (d.decision !== "A") throw Error("يجب اعتماد قبول الجودة قبل إتمام استلام الثمار");
+	if (!db.batch) throw Error("تسجيل استلام الثمار يحتاج تحديث خادم البرنامج");
+	const inv = await inventorySnapshot(db, row.demo), state = inv.state, clock = operatingShift(now), lotId = "T-" + row.id;
+	assertDayOpen(inv, clock.day);
+	const legacy = Boolean(d.productionOrderId || inv.orders.some((o) => (o.data.receipts || []).some((r) => r.ticketId === row.id)) || state.issues.some((i) => i.lotId === lotId) || state.warehouseReceipts.some((r) => r.lotId === lotId) || state.transfers.some((t) => t.sourceLotId === lotId) || state.preparations.some((p) => p.lotId === lotId) || state.reservations.some((r) => r.lotId === lotId) || state.adjustments.some((r) => r.lotId === lotId));
+	let order = null, issue = null, reason = "no-order", issued = 0;
+	if (!legacy) {
+		state.fruitLocations ||= {};
+		state.fruitLocations[lotId] = "PROD";
+		const selected = inv.orders.find((o) => o.id === d.receivingOrderId);
+		if (d.receivingOrderId) {
+			reason = "order-unavailable";
+			if (selected && selected.status === "open" && ["Bulk", "PI01"].includes(selected.data.type)) {
+				reason = "outside-period";
+				if (selected.data.from <= clock.day && selected.data.to >= clock.day) {
+					reason = "order-not-released";
+					if (isReleased(inv, selected)) {
+						const requirement = (selected.data.requirements || []).find((r) => r.code === d.fruitCode && r.unit === "KG");
+						reason = "no-remaining-need";
+						if (requirement) {
+							const pending = state.preparations.filter((p) => p.orderId === selected.id && p.code === d.fruitCode).reduce((n, p) => n + Math.max(0, p.quantity - p.received - p.cancelled), 0);
+							const reserved = state.reservations.filter((r) => r.orderId === selected.id && r.code === d.fruitCode).reduce((n, r) => n + r.remaining, 0);
+							const remaining = round$1(Math.max(0, remainingRequirement(inv, selected, d.fruitCode) - pending - reserved));
+							const closed = selected.data.shifts.some((s) => s.id === clock.id && s.closedAt);
+							reason = closed ? "shift-closed" : "no-remaining-need";
+							if (!closed && remaining > 0) {
+								issued = round$1(Math.min(d.net, remaining));
+								if (issued > 0) {
+									order = selected;
+									const shift = ensureAutoShift(inv, order, u, now), acceptedBy = d.unloadBy || u.email;
+									issue = {
+										id: "FRI-" + crypto.randomUUID(),
+										number: "GI-" + String(state.issues.length + 1).padStart(7, "0"),
+										orderId: order.id,
+										lotId,
+										code: d.fruitCode,
+										name: d.fruit,
+										category: "raw",
+										unit: "KG",
+										warehouse: "PROD",
+										batch: "B-" + String(row.id).padStart(7, "0"),
+										quantity: issued,
+										at: now,
+										by: acceptedBy,
+										postedBy: u.email,
+										acceptedAt: now,
+										acceptedBy,
+										...shiftMetadata(now),
+										shiftId: shift.id,
+										directFruit: true,
+										automaticFruitReceipt: true,
+										ticketId: row.id,
+										sourceReference: "FR-" + String(row.id).padStart(7, "0"),
+										notes: "صرف الثمار مباشرة عند اكتمال الوزن الفارغ"
+									};
+									state.issues.push(issue);
+									reason = issued < d.net ? "partial" : "allocated";
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	} else reason = "historical";
+	const receipt = {
+		schemaVersion: 7,
+		postingKey: crypto.randomUUID(),
+		warehouse: legacy ? "historical" : "PROD",
+		lotId,
+		requestedOrderId: d.receivingOrderId || null,
+		requestedOrderNumber: d.order || "",
+		receivedQuantity: d.net,
+		issuedQuantity: issued,
+		unallocatedQuantity: legacy ? null : round$1(d.net - issued),
+		orderId: order?.id || null,
+		orderNumber: order?.number || "",
+		issueId: issue?.id || null,
+		issueNumber: issue?.number || "",
+		status: legacy ? "historical" : issued === d.net ? "allocated" : issued > 0 ? "partial" : "stock",
+		reason,
+		at: now,
+		postedBy: u.email,
+		...shiftMetadata(now)
+	};
+	d.fruitReceipt = receipt;
+	d.emptyBy = u.email;
+	if (!legacy) {
+		d.requiresWarehouseReceipt = false;
+		d.receivingRoute = "direct-production-v47";
+	}
+	const action = issued > 0 ? "استلام ثمار بمخزن الإنتاج وصرف مباشر على الأمر" : "استلام ثمار مباشرة بمخزن الإنتاج";
+	const history = [...JSON.parse(row.history), {
+		at: now,
+		by: u.email,
+		action,
+		...shiftMetadata(now),
+		receipt
+	}];
+	state.history.push({
+		id: "FR-" + receipt.postingKey,
+		at: now,
+		by: u.email,
+		action,
+		reference: lotId,
+		orderId: order?.id || null,
+		...shiftMetadata(now)
+	});
+	const orderGuard = order ? " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND status='open' AND version=?)" : "", orderArgs = order ? [
+		order.id,
+		row.demo,
+		order.version
+	] : [];
+	const ticketSql = "UPDATE tickets SET data=?,history=?,status='done',version=version+1 WHERE id=? AND demo=? AND version=? AND status IN ('empty','assign') AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=?" + orderGuard;
+	const ticketArgs = [
+		JSON.stringify(d),
+		JSON.stringify(history),
+		row.id,
+		row.demo,
+		row.version,
+		row.demo,
+		inv.version,
+		...orderArgs
+	];
+	const guard = "EXISTS (SELECT 1 FROM tickets WHERE id=? AND demo=? AND version=? AND json_extract(data,'$.fruitReceipt.postingKey')=?)", args = [
+		row.id,
+		row.demo,
+		row.version + 1,
+		receipt.postingKey
+	];
+	const inventorySql = inv.version === 0 ? "INSERT INTO inventory(id,version,data) SELECT ?,1,? WHERE " + guard + " ON CONFLICT(id) DO UPDATE SET data=excluded.data,version=inventory.version+1 WHERE inventory.version=0" : "UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=? AND " + guard;
+	const inventoryArgs = inv.version === 0 ? [
+		row.demo,
+		JSON.stringify(state),
+		...args
+	] : [
+		JSON.stringify(state),
+		row.demo,
+		inv.version,
+		...args
+	];
+	const saved = await db.batch([{
+		sql: ticketSql,
+		args: ticketArgs
+	}, {
+		sql: inventorySql,
+		args: inventoryArgs
+	}]);
+	if (saved.length !== 2 || saved.some((r) => r.changes !== 1)) {
+		const repeated = replay(await db.first("SELECT * FROM tickets WHERE id=?", [row.id]), u, b);
+		if (repeated) return repeated;
+		throw Error("تغيرت التذكرة أو الأرصدة أو الأمر؛ أعد فتح التذكرة");
+	}
+	return {
+		ok: true,
+		receipt
+	};
 }
 //#endregion
 //#region lib/operations-control.ts
@@ -14138,7 +15499,8 @@ async function controlOperation(db, u, b) {
 	const base = {
 		id,
 		at: now,
-		by: u.email
+		by: u.email,
+		...shiftMetadata(now)
 	};
 	let action = "", guardOrder = null;
 	const request = (kind, data) => {
@@ -14156,10 +15518,10 @@ async function controlOperation(db, u, b) {
 	const allocate = (o) => {
 		for (const need of o.data.requirements) {
 			const existing = d.reservations.filter((r) => r.orderId === o.id && r.code === need.code).reduce((n, r) => n + r.remaining, 0), issued = d.issues.filter((i) => i.orderId === o.id && i.code === need.code).reduce((n, i) => n + i.quantity - d.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0), 0), prepared = d.preparations.filter((p) => p.orderId === o.id && p.code === need.code).reduce((n, p) => n + p.quantity - p.received - p.cancelled, 0);
-			let left = round(Math.max(0, need.quantity - existing - issued - prepared));
+			let left = round$1(Math.max(0, need.quantity - existing - issued - prepared));
 			const options = inv.lots.filter((l) => l.code === need.code && l.quality === "A" && !l.warehousePending && !expired(l, dateInCairo(now)) && (o.data.type === "Filling" && l.category === "semi" ? (l.originLotId || l.id) === o.data.sourceOriginLotId : l.warehouse === "PROD")).sort((a, b) => String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)));
 			for (const l of options) {
-				const amount = round(Math.min(left, l.available));
+				const amount = round$1(Math.min(left, l.available));
 				if (amount <= 0) continue;
 				d.reservations.push({
 					id: "RES-" + crypto.randomUUID(),
@@ -14172,8 +15534,8 @@ async function controlOperation(db, u, b) {
 					at: now,
 					approval: true
 				});
-				l.available = round(l.available - amount);
-				left = round(left - amount);
+				l.available = round$1(l.available - amount);
+				left = round$1(left - amount);
 				if (!left) break;
 			}
 			if (left > 0 && o.data.type === "Filling" && inv.materials.find((m) => m.code === need.code)?.category === "semi") throw Error("رصيد البلك لا يكفي لحجز أمر التعبئة؛ راجع الأوامر المعتمدة");
@@ -14182,6 +15544,7 @@ async function controlOperation(db, u, b) {
 	if (op === "control_order_submit") {
 		allowed("plan");
 		const o = order(b.orderId);
+		if (o.data.automaticFilling) throw Error("إطلاق أمر التعبئة التلقائي يتم بعد اكتمال الجودة والمواد");
 		if (o.status !== "open" || o.data.cycleVersion < 4 || isReleased(inv, o)) throw Error("الأمر غير متاح لطلب الإطلاق");
 		if (c.requests.some((r) => r.kind === "release" && r.orderId === o.id && r.status === "pending")) throw Error("يوجد طلب اعتماد معلق");
 		request("release", {
@@ -14239,7 +15602,7 @@ async function controlOperation(db, u, b) {
 		if (!["A", "R"].includes(b.decision)) throw Error("اختر قبول أو رفض");
 		const reason = required(b.reason, "سبب قرار الاعتماد");
 		if (b.decision === "A") {
-			assertDayOpen(inv, dateInCairo(now));
+			assertDayOpen(inv, operatingShift(now).day);
 			if (r.kind === "release") {
 				const o = order(r.orderId);
 				if (o.status !== "open" || o.version !== r.orderVersion || isReleased(inv, o)) throw Error("الأمر تغير؛ أعد تقديم الطلب");
@@ -14257,7 +15620,7 @@ async function controlOperation(db, u, b) {
 			} else if (r.kind === "count") {
 				const l = lot(r.lotId);
 				if (l.balance !== r.expectedBalance) throw Error("تغير الرصيد بعد الجرد؛ أعد الجرد والتقديم");
-				const delta = round(r.count - l.balance);
+				const delta = round$1(r.count - l.balance);
 				if (delta < 0 && -delta > l.available) throw Error("فرق الجرد يتعارض مع كميات محجوزة أو مستخدمة");
 				if (delta) d.adjustments.push({
 					...base,
@@ -14403,10 +15766,9 @@ async function controlOperation(db, u, b) {
 		if (!m) throw Error("اختر المعدة");
 		const lineId = m.kind === "line" ? m.id : m.lineId;
 		assertScope(inv, u, { lineId });
-		const value = day(b.day);
-		if (value > dateInCairo(now)) throw Error("اليوم مستقبلي");
+		const clock = operatingShift(now), value = clock.day;
 		assertDayOpen(inv, value);
-		const shift = required(b.shift, "الشفت"), o = b.orderId ? order(b.orderId) : null;
+		const shift = clock.name, o = b.orderId ? order(b.orderId) : null;
 		if (o && o.data.lineId !== lineId) throw Error("الأمر مرتبط بخط آخر");
 		const record = {
 			...base,
@@ -14493,7 +15855,7 @@ async function controlOperation(db, u, b) {
 		const lineId = m.kind === "line" ? m.id : m.lineId;
 		assertScope(inv, u, { lineId });
 		const start = stamp(b.start);
-		assertDayOpen(inv, dateInCairo(start));
+		assertDayOpen(inv, operatingShift(start).day);
 		if (c.incidents.some((i) => i.machineId === m.id && !i.closedAt)) throw Error("يوجد عطل مفتوح للمعدة");
 		const o = b.orderId ? order(b.orderId) : null;
 		if (o && o.data.lineId !== lineId) throw Error("الأمر مرتبط بخط آخر");
@@ -14524,7 +15886,7 @@ async function controlOperation(db, u, b) {
 		const m = c.machines.find((m) => m.id === r.machineId);
 		assertScope(inv, u, { lineId: m?.kind === "line" ? m.id : m?.lineId });
 		const end = stamp(b.end);
-		assertDayOpen(inv, dateInCairo(end));
+		assertDayOpen(inv, operatingShift(end).day);
 		if (end < r.start) throw Error("نهاية التوقف تسبق البداية");
 		r.closedAt = now;
 		r.end = end;
@@ -14550,7 +15912,7 @@ async function controlOperation(db, u, b) {
 		assertScope(inv, u, { lineId: m.id });
 		const start = stamp(b.start), end = stamp(b.end);
 		if (start > end) throw Error("نهاية CIP تسبق البداية");
-		assertDayOpen(inv, dateInCairo(end));
+		assertDayOpen(inv, operatingShift(end).day);
 		c.cip.push({
 			...base,
 			number: "CIP-" + String(c.cip.length + 1).padStart(7, "0"),
@@ -14618,6 +15980,7 @@ async function controlOperation(db, u, b) {
 		action,
 		role
 	});
+	tagNewMovements(d, now);
 	const guard = guardOrder ? " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=?)" : "", args = guardOrder ? [
 		guardOrder.id,
 		demo,
@@ -14913,13 +16276,14 @@ async function warehouseCycle(db, u, b) {
 		"cycle_customer",
 		"cycle_incoming_quality",
 		"cycle_container_release"
-	].includes(op)) assertDayOpen(inv, dateInCairo(now));
+	].includes(op)) assertDayOpen(inv, operatingShift(now).day);
 	let description = "", guardOrder = null, guardTicket = null;
 	const serial = (prefix, rows) => prefix + "-" + String(rows.length + 1).padStart(7, "0");
 	const base = {
 		id,
 		at: now,
-		by: u.email
+		by: u.email,
+		...shiftMetadata(now)
 	};
 	const warehouse = () => {
 		assertWarehouse(u, b.warehouse);
@@ -14941,6 +16305,7 @@ async function warehouseCycle(db, u, b) {
 		assertReleased(inv, o);
 		assertScope(inv, u, { lineId: o.data.lineId });
 		guardOrder = o;
+		ensureAutoShift(inv, o, u, now);
 		return o;
 	};
 	const workingIssue = () => {
@@ -14951,11 +16316,7 @@ async function warehouseCycle(db, u, b) {
 			o: order(i.orderId)
 		};
 	};
-	const shift = (o) => {
-		const s = o.data.shifts.find((s) => s.id === b.shiftId && !s.closedAt);
-		if (!s) throw Error("اختر شفتًا مفتوحًا");
-		return s;
-	};
+	const shift = (o) => ensureAutoShift(inv, o, u, now);
 	const day = (value) => {
 		const s = required(value, "التاريخ");
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(Date.parse(s)) || new Date(s).toISOString().slice(0, 10) !== s) throw Error("تاريخ غير صحيح");
@@ -14988,12 +16349,12 @@ async function warehouseCycle(db, u, b) {
 		if (!l.directFruit || l.warehouse !== "PROD" || o.data.type !== "Bulk" || l.quality !== "A" || l.warehousePending) throw Error("اختر شحنة ثمار مستلمة بالحوض وأمر Bulk");
 		if (!o.data.requirements.some((r) => r.code === l.code)) throw Error("الثمار لا تطابق مخطط صرف الأمر");
 		const own = d.reservations.filter((r) => r.orderId === o.id && r.lotId === l.id && r.remaining > 0), ownQty = own.reduce((n, r) => n + r.remaining, 0);
-		if (amount > round(l.available + ownQty)) throw Error("كمية الثمار تتجاوز المتاح بالحوض");
+		if (amount > round$1(l.available + ownQty)) throw Error("كمية الثمار تتجاوز المتاح بالحوض");
 		let left = amount;
 		for (const r of own) {
 			const take = Math.min(left, r.remaining);
-			r.remaining = round(r.remaining - take);
-			left = round(left - take);
+			r.remaining = round$1(r.remaining - take);
+			left = round$1(left - take);
 		}
 		d.issues.push({
 			...base,
@@ -15046,7 +16407,7 @@ async function warehouseCycle(db, u, b) {
 		const amount = qty(b.quantity), net = d.issues.filter((i) => i.orderId === o.id && i.code === b.code).reduce((s, i) => s + i.quantity - d.returns.filter((r) => r.issueId === i.id).reduce((n, r) => n + r.quantity, 0), 0);
 		const outstanding = d.supplyRequests.filter((r) => r.orderId === o.id && r.code === b.code && !r.cancelledAt).reduce((s, r) => s + Math.max(0, r.quantity - d.preparations.filter((p) => p.supplyRequestId === r.id).reduce((n, p) => n + p.received, 0)), 0);
 		const unlinked = d.preparations.filter((p) => p.orderId === o.id && p.code === b.code && !p.supplyRequestId).reduce((s, p) => s + p.quantity - p.received - p.cancelled, 0);
-		if (round(amount + net + outstanding + unlinked) > r.quantity) throw Error("الكمية أكبر من المتبقي للاحتياج");
+		if (round$1(amount + net + outstanding + unlinked) > r.quantity) throw Error("الكمية أكبر من المتبقي للاحتياج");
 		d.supplyRequests.push({
 			...base,
 			number: serial("MR", d.supplyRequests),
@@ -15199,7 +16560,7 @@ async function warehouseCycle(db, u, b) {
 			const p = packs.find((p) => p.id === line.packId), q = qty(line.quantity);
 			if (!p || p.unit === "PC" && !Number.isInteger(q)) throw Error("راجع عدد العبوات");
 			const sent = d.deliveries.flatMap((x) => x.packages).filter((x) => x.packId === p.id).reduce((s, x) => s + x.quantity, 0);
-			if (q > round(p.quantity - sent)) throw Error("عدد العبوات يتجاوز المتبقي على الدفعة");
+			if (q > round$1(p.quantity - sent)) throw Error("عدد العبوات يتجاوز المتبقي على الدفعة");
 			return {
 				packId: p.id,
 				code: p.code,
@@ -15210,7 +16571,7 @@ async function warehouseCycle(db, u, b) {
 			};
 		});
 		if (amount === l.balance) {
-			for (const p of packs) if (round(d.deliveries.flatMap((x) => x.packages).filter((x) => x.packId === p.id).reduce((s, x) => s + x.quantity, 0) + (packages.find((x) => x.packId === p.id)?.quantity || 0)) !== p.quantity) throw Error("التسليم النهائي يجب أن يشمل كل العبوات المتبقية على الدفعة");
+			for (const p of packs) if (round$1(d.deliveries.flatMap((x) => x.packages).filter((x) => x.packId === p.id).reduce((s, x) => s + x.quantity, 0) + (packages.find((x) => x.packId === p.id)?.quantity || 0)) !== p.quantity) throw Error("التسليم النهائي يجب أن يشمل كل العبوات المتبقية على الدفعة");
 		}
 		const due = packages.some((p) => p.returnable) ? day(b.due) : "";
 		const today = new Intl.DateTimeFormat("en-CA", {
@@ -15306,6 +16667,7 @@ async function warehouseCycle(db, u, b) {
 		...base,
 		action: description
 	});
+	tagNewMovements(d, now);
 	let guard = "", args = [];
 	if (guardOrder) {
 		guard += " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=?)";
@@ -15325,7 +16687,10 @@ async function warehouseCycle(db, u, b) {
 		inv.version,
 		...args
 	])).changes) throw Error("تعارض تحديث الأرصدة أو الأمر؛ حدّث الصفحة وأعد المحاولة");
-	return { ok: true };
+	return {
+		ok: true,
+		...op === "cycle_receive" ? await safeAutomaticFilling(db, u, demo, inv.lots.find((l) => l.id === b.lotId)?.category === "semi" ? { sourceLotId: b.lotId } : {}) : {}
+	};
 }
 //#endregion
 //#region lib/receiving.ts
@@ -15387,6 +16752,7 @@ async function receivingOperation(db, u, b) {
 			if (!raw || raw.demo !== row.demo) throw Error("أمر التشغيل غير موجود في نفس سجل التشغيل");
 			order = decodeOrder(raw);
 			if (!eligibleReceivingOrders([order], d.fruitCode).length) throw Error("أمر التشغيل مغلق أو لا يحتوي المادة الخام للشحنة");
+			assertScope(await inventorySnapshot(db, row.demo), u, { lineId: order.data.lineId });
 			d.receivingOrderId = order.id;
 			d.order = order.number;
 		}
@@ -15396,10 +16762,15 @@ async function receivingOperation(db, u, b) {
 		status = "empty";
 		action = "تأكيد الاستلام والتفريغ" + (order ? " — " + order.number : " — إلى حوض الإنتاج");
 	} else throw Error("إجراء غير معروف");
+	d.stageShifts = {
+		...d.stageShifts || {},
+		[b.action]: shiftMetadata(now)
+	};
 	const history = [...JSON.parse(row.history), {
 		at: now,
 		by: u.email,
-		action
+		action,
+		...shiftMetadata(now)
 	}];
 	const guard = order ? " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND version=? AND status='open')" : "";
 	const args = [
@@ -15482,6 +16853,7 @@ function createData(b, now, catalog) {
 		requiresAgriculturalInspection: true,
 		requiresWarehouseReceipt: false,
 		receivingRoute: "direct-pond-v43",
+		arrivalShift: shiftMetadata(now),
 		fruitEn: fruit[2] || "",
 		plateKey: normalizePlate(text(b.plate, "لوحة السيارة")),
 		fruit: fruit[0],
@@ -15510,8 +16882,39 @@ function transition(row, action, b, role, now) {
 	let status = "";
 	if (action === "quality") {
 		{
-			const q = validateAgriculturalInspection(b, now, d);
+			const shift = operatingShift(now);
+			const q = validateAgriculturalInspection({
+				...b,
+				inspectionShift: [
+					"A",
+					"B",
+					"C"
+				][shift.slot - 1]
+			}, now, d);
+			Object.assign(q, {
+				shiftName: shift.name,
+				shiftId: shift.id,
+				operatingDay: shift.day
+			});
 			d.agriculturalQuality = q;
+			if (b.approveReceiving === true && b.decision === "A") {
+				if (b.allowProceed !== true) throw Error("أكد السماح بمتابعة الاستلام مع اعتماد الخصم");
+				d.receivingQuality = {
+					schemaVersion: 6,
+					source: "combined-inspection",
+					previous: d.deduction ?? 0,
+					deduction: q.finalDeduction,
+					decision: "A",
+					reviewerName: q.inspectorName,
+					reason: q.reason,
+					override: q.override,
+					warningAcknowledged: q.warningAcknowledged,
+					allowProceed: true,
+					confirmed: true,
+					at: now,
+					inspectionAt: q.approvedAt
+				};
+			}
 			b = {
 				...b,
 				deduction: q.finalDeduction,
@@ -15543,6 +16946,10 @@ function transition(row, action, b, role, now) {
 		d.amount = d.unitPrice == null ? null : Math.round(d.payable * d.unitPrice * 100) / 100;
 		status = "done";
 	} else throw Error("إجراء غير معروف");
+	d.stageShifts = {
+		...d.stageShifts || {},
+		[action]: shiftMetadata(now)
+	};
 	return {
 		data: d,
 		status
@@ -15567,4 +16974,4 @@ function normalizePlate(value) {
 var createTicketSql = `INSERT INTO tickets (demo,version,status,data,history,created_at) SELECT ?,1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM tickets WHERE demo=? AND coalesce(json_extract(data,'$.plateKey'),${plateReplacements.reduce((sql, [a, b]) => `replace(${sql},'${a}','${b}')`, "lower(json_extract(data,'$.plate'))")})=? AND created_at>?)`;
 var duplicatePlateMessage = "السيارة مسجلة بالفعل خلال آخر 4 ساعات. افتح التذكرة الحالية لاستكمال الإجراءات، أو أعد التسجيل بعد انقضاء المدة.";
 //#endregion
-export { assignTicketOrder, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, inventoryOperation, inventorySnapshot, labelBatchChoices, nextOutputBatch, normalizePlate, productionOperation, receivingOperation, roles, stages, statuses, text, transition, validateCatalog, warehouseCycle };
+export { assignTicketOrder, automaticFillingOperation, completeFruitReceipt, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, groupedInventoryOperation, inventoryOperation, inventorySnapshot, labelBatchChoices, nextOutputBatch, normalizePlate, operatingShift, productionOperation, receivingOperation, roles, shiftMetadata, stages, statuses, text, transition, validateCatalog, warehouseCycle };
