@@ -12971,7 +12971,7 @@ async function createEarlyPacking(db, inv, data, bulkSql, bulkArgs, demo, actor,
 	const available = /* @__PURE__ */ new Map();
 	const lots = inv.lots.filter((l) => ["PROD", "PACK"].includes(l.warehouse) && l.quality === "A" && !l.warehousePending && !l.expired && l.available > 0).sort((a, b) => Number(b.warehouse === "PROD") - Number(a.warehouse === "PROD") || String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)));
 	for (const l of lots) available.set(l.id, l.available);
-	for (const need of p.inputs) {
+	for (const need of p.shift?.inputs || p.inputs) {
 		let left = need.quantity;
 		for (const l of lots.filter((l) => l.code === need.code && l.unit === need.unit)) {
 			let quantity = Math.min(left, available.get(l.id) || 0);
@@ -13195,6 +13195,21 @@ async function productionOperation(db, u, b) {
 					policy
 				}
 			});
+			if (b.shiftPackingQty !== void 0 && b.shiftPackingQty !== "") {
+				const amount = qty(b.shiftPackingQty), slot = Number(b.shiftPackingSlot || 1);
+				if (amount > data.target || ![
+					1,
+					2,
+					3
+				].includes(slot)) throw Error("راجع كمية التجهيز ورقم الشيفت؛ الكمية لا تتجاوز أمر البلك");
+				const shiftPlan = earlyPackingPlan(inv.materials, m.code, amount, code, policy);
+				Object.assign(data.earlyPacking, { shift: {
+					day: from,
+					slot,
+					amount,
+					inputs: shiftPlan.inputs
+				} });
+			}
 		}
 		const insertSql = `INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`;
 		const insertArgs = [
