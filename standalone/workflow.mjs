@@ -13211,7 +13211,7 @@ async function productionOperation(db, u, b) {
 				} });
 			}
 		}
-		const insertSql = `INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`;
+		let insertSql = `INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`;
 		const insertArgs = [
 			b.demo === true ? 1 : 0,
 			JSON.stringify(data),
@@ -13224,6 +13224,14 @@ async function productionOperation(db, u, b) {
 			from
 		];
 		if (type === "Bulk" && b.fillingCode) return createEarlyPacking(db, inv, data, insertSql, insertArgs, b.demo === true ? 1 : 0, u, now);
+		if (b.assistantInventoryVersion !== void 0) {
+			if (type !== "Filling" || !source || b.assistantInventoryVersion !== inv.version || !Number.isSafeInteger(b.assistantOrderVersion)) throw Error("تغيرت بيانات المعاينة؛ راجع الأمر مرة أخرى");
+			const sourceOrder = inv.orders.find((o) => o.id === source.orderId && o.status === "open" && o.version === b.assistantOrderVersion);
+			if (!sourceOrder) throw Error("تغير أمر البلك أو أُغلق؛ راجع المعاينة");
+			insertSql = insertSql.replace("HAVING ?='Filling' OR NOT EXISTS", "HAVING (?='Filling' OR NOT EXISTS") + ") AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=? AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=? AND status='open') AND NOT EXISTS (SELECT 1 FROM production_orders WHERE demo=? AND status='open' AND json_extract(data,'$.type')='Filling' AND json_extract(data,'$.sourceOrderId')=? AND (json_extract(data,'$.sourceLotId')=? OR json_extract(data,'$.automaticFilling.planned')=1))";
+			const scope = b.demo === true ? 1 : 0;
+			insertArgs.push(scope, inv.version, sourceOrder.id, scope, sourceOrder.version, scope, sourceOrder.id, source.id);
+		}
 		const result = await db.run(insertSql, insertArgs);
 		if (!result.changes) {
 			const conflict = await db.first("SELECT * FROM production_orders WHERE demo=? AND json_extract(data,'$.type') IN ('Bulk','PI01') AND json_extract(data,'$.code')=? AND json_extract(data,'$.from')<=? AND json_extract(data,'$.to')>=? ORDER BY id LIMIT 1", [
