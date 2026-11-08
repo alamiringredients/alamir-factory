@@ -1,3 +1,209 @@
+//#region lib/access.ts
+var roles = {
+	admin: "مدير النظام",
+	security: "الاستقبال والأمن",
+	quality: "الجودة",
+	scale: "الميزان",
+	production: "مشرف الإنتاج",
+	warehouse: "المخازن — صلاحية عامة",
+	planner: "تخطيط الإنتاج",
+	store_main: "أمين المخزن الرئيسي",
+	store_production: "أمين مخزن الإنتاج",
+	store_finished: "أمين مخزن المنتج التام",
+	plant_manager: "مدير المصنع",
+	maintenance: "الصيانة",
+	cost_control: "مراقبة التكاليف",
+	viewer: "متابعة وتقارير"
+};
+var actualRole = (u) => u.actualRole || u.role;
+function warehouseAllowed(role, code) {
+	return !role.startsWith("store_") || role === "store_production" && code === "PROD" || role === "store_finished" && code === "FG" || role === "store_main" && !["PROD", "FG"].includes(code);
+}
+function operator(u, action) {
+	const role = actualRole(u);
+	let mapped = role;
+	const planner = [
+		"production_create",
+		"production_requirement",
+		"production_bom",
+		"production_rate"
+	];
+	const factory = [
+		"production_close",
+		"production_change_decide",
+		"production_balance_decide"
+	];
+	if (role === "planner") {
+		if (!planner.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية التخطيط");
+		mapped = "production";
+	}
+	if (role === "plant_manager") {
+		if (!factory.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة تحتاج مسؤول القسم المختص");
+		mapped = "admin";
+	}
+	if (role.startsWith("store_")) {
+		mapped = ["inventory_accept", "inventory_transfer_accept"].includes(action) && role === "store_production" ? "production" : "warehouse";
+		if (role === "store_main" && [
+			"inventory_issue",
+			"inventory_prepare_bom",
+			"inventory_return",
+			"inventory_accept",
+			"inventory_reserve"
+		].includes(action)) throw Error("الصرف على الأمر من مسؤولية مخزن الإنتاج");
+		if (role === "store_finished" && ![
+			"cycle_receive",
+			"cycle_deliver",
+			"cycle_customer",
+			"cycle_container_return",
+			"inventory_labels",
+			"inventory_label_link",
+			"inventory_transfer",
+			"inventory_transfer_accept",
+			"inventory_transfer_cancel"
+		].includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية مخزن المنتج التام");
+	}
+	return {
+		...u,
+		actualRole: role,
+		role: mapped
+	};
+}
+function assertWarehouse(u, code) {
+	if (!warehouseAllowed(actualRole(u), code)) throw Error("المخزن خارج نطاق صلاحيتك");
+}
+function assertApprover(u, createdBy, demo) {
+	if (actualRole(u) === "admin") return;
+	if (!["plant_manager"].includes(actualRole(u))) throw Error("الاعتماد من صلاحية مدير المصنع");
+	if (!demo && u.email === createdBy) throw Error("منشئ الطلب لا يعتمد طلبه في سجل التشغيل");
+}
+//#endregion
+//#region lib/read-scope.ts
+function scopedOperations(input, tickets, catalog, u) {
+	const role = actualRole(u);
+	if (role === "admin") return {
+		inventory: input,
+		orders: [...input.orders].sort((a, b) => b.id - a.id),
+		tickets,
+		catalog
+	};
+	const inv = structuredClone(input), s = inv.state, c = s.control || {}, scope = (c.userScopes || []).find((r) => r.email === u.email.toLowerCase()), lineRestricted = !!scope?.lines?.length, warehouseRestricted = !!scope?.warehouses?.length || role.startsWith("store_");
+	const warehouse = (w) => warehouseAllowed(role, w) && (!scope?.warehouses?.length || scope.warehouses.includes(w));
+	c.userScopes = (c.userScopes || []).filter((r) => r.email === u.email.toLowerCase());
+	s.fastOperations = [];
+	if (!lineRestricted && !warehouseRestricted) return {
+		inventory: inv,
+		orders: inv.orders.sort((a, b) => b.id - a.id),
+		tickets,
+		catalog
+	};
+	const orders = inv.orders.filter((o) => !lineRestricted || scope.lines.includes(o.data.lineId)), orderIds = new Set(orders.map((o) => o.id));
+	const lots = inv.lots.filter((l) => warehouse(l.warehouse) && (!l.orderId || orderIds.has(l.orderId))), lotIds = new Set(lots.map((l) => l.id));
+	const visibleTickets = warehouse("PROD") ? tickets.filter((t) => !lineRestricted || orderIds.has(t.data.productionOrderId) || orders.some((o) => (o.data.receipts || []).some((r) => r.ticketId === t.id))) : [], ticketIds = new Set(visibleTickets.map((t) => t.id));
+	const byOrder = (r) => orderIds.has(r.orderId), byLot = (r) => lotIds.has(r.lotId), issues = s.issues.filter((i) => byOrder(i) && byLot(i)), issueIds = new Set(issues.map((i) => i.id)), byIssue = (r) => issueIds.has(r.issueId);
+	const deliveries = s.deliveries.filter(byLot), deliveryIds = new Set(deliveries.map((d) => d.id));
+	const state = {
+		materials: s.materials,
+		salePrices: s.salePrices,
+		warehouses: s.warehouses,
+		entries: s.entries.filter((r) => lotIds.has(r.id)),
+		issues,
+		returns: s.returns.filter(byIssue),
+		preparations: s.preparations.filter((r) => byOrder(r) && byLot(r)),
+		reservations: s.reservations.filter((r) => byOrder(r) && byLot(r)),
+		adjustments: s.adjustments.filter(byLot),
+		warehouseReceipts: s.warehouseReceipts.filter(byLot),
+		incomingInspections: s.incomingInspections.filter(byLot),
+		consumptions: s.consumptions.filter((r) => byIssue(r) && (!r.outputLotId || lotIds.has(r.outputLotId))),
+		packs: s.packs.filter((r) => byIssue(r) && lotIds.has(r.outputLotId)),
+		returnRequests: s.returnRequests.filter(byIssue),
+		supplyRequests: warehouse("PROD") ? s.supplyRequests.filter(byOrder) : [],
+		deliveries,
+		customers: warehouse("FG") ? s.customers : [],
+		containerReturns: s.containerReturns.filter((r) => deliveryIds.has(r.deliveryId)),
+		settlements: s.settlements.filter((r) => deliveryIds.has(r.deliveryId)),
+		transfers: (s.transfers || []).filter((t) => (warehouse(t.fromWarehouse) || warehouse(t.toWarehouse)) && (!t.material?.orderId || orderIds.has(t.material.orderId))).map((t) => ({
+			...t,
+			allocations: (t.allocations || []).filter(byOrder)
+		})),
+		operationShifts: (s.operationShifts || []).filter(byOrder),
+		automaticFillingJobs: (s.automaticFillingJobs || []).filter((j) => orderIds.has(j.parentOrderId) && (!j.sourceLotId || lotIds.has(j.sourceLotId))),
+		labelRuns: (s.labelRuns || []).filter((r) => r.lotId ? lotIds.has(r.lotId) : r.orderId ? byOrder(r) && warehouse("FG") : !lineRestricted && warehouse("FG")),
+		fruitLocations: Object.fromEntries(Object.entries(s.fruitLocations || {}).filter(([k]) => lotIds.has(k))),
+		history: [],
+		fastOperations: []
+	};
+	const machines = (c.machines || []).filter((m) => !lineRestricted || scope.lines.includes(m.kind === "line" ? m.id : m.lineId)), machineIds = new Set(machines.map((m) => m.id));
+	state.control = {
+		machines,
+		userScopes: c.userScopes,
+		closedDays: c.closedDays || [],
+		costCentres: c.costCentres || [],
+		incidents: (c.incidents || []).filter((r) => machineIds.has(r.machineId)),
+		equipmentChecks: (c.equipmentChecks || []).filter((r) => machineIds.has(r.machineId)),
+		equipmentReviews: (c.equipmentReviews || []).filter((r) => machineIds.has(r.machineId)),
+		cip: (c.cip || []).filter((r) => !lineRestricted || scope.lines.includes(r.lineId)),
+		releases: (c.releases || []).filter(byOrder),
+		requests: (c.requests || []).filter((r) => r.orderId ? byOrder(r) : r.lotId ? byLot(r) : r.by === u.email),
+		trace: (c.trace || []).filter((r) => byOrder(r) && lotIds.has(r.outputLotId) && byIssue(r)),
+		audit: (c.audit || []).filter((r) => r.by === u.email)
+	};
+	for (const o of orders) {
+		const d = o.data;
+		d.confirmations = (d.confirmations || []).filter((x) => lotIds.has("P-" + o.id + "-" + x.id));
+		const ids = new Set(d.confirmations.map((x) => x.id));
+		d.weights = (d.weights || []).filter((r) => ids.has(r.confirmationId));
+		d.receipts = (d.receipts || []).filter((r) => ticketIds.has(r.ticketId));
+		d.history = (d.history || []).filter((r) => r.by === u.email);
+		if (warehouseRestricted) {
+			d.processBalance = null;
+			d.balanceHistory = [];
+			d.handovers = [];
+			d.waste = [];
+			d.packaging = [];
+		}
+	}
+	const balances = [];
+	for (const l of lots) {
+		let b = balances.find((b) => b.code === l.code && b.warehouse === l.warehouse && b.unit === l.unit);
+		if (!b) {
+			b = {
+				code: l.code,
+				name: l.name,
+				category: l.category,
+				warehouse: l.warehouse,
+				unit: l.unit,
+				balance: 0,
+				reserved: 0,
+				available: 0,
+				pending: 0,
+				rejected: 0
+			};
+			balances.push(b);
+		}
+		for (const k of [
+			"balance",
+			"reserved",
+			"available"
+		]) b[k] += Number(l[k] || 0);
+		if (l.quality === "H") b.pending += l.balance;
+		if (l.quality === "R") b.rejected += l.balance;
+	}
+	return {
+		inventory: {
+			...inv,
+			state,
+			orders,
+			lots,
+			balances,
+			readRestricted: true
+		},
+		orders: orders.sort((a, b) => b.id - a.id),
+		tickets: visibleTickets,
+		catalog,
+		readRestricted: true
+	};
+}
+//#endregion
 //#region lib/cairo-time.ts
 function cairoLocalISO(value) {
 	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw Error("توقيت القاهرة غير صحيح");
@@ -94,7 +300,7 @@ function mergeOrderShifts(state, o, at = (/* @__PURE__ */ new Date()).toISOStrin
 }
 function ensureAutoShift(inv, o, u, now, saveTo = "inventory") {
 	const clock = operatingShift(now);
-	if (clock.day < o.data.from || clock.day > o.data.to) throw Error("توقيت الحركة خارج فترة أمر التشغيل");
+	if (clock.day < o.data.from || clock.day > o.data.to) throw Error("توقيت الحركة خارج فترة أمر التشغيل: يوم التشغيل الحالي " + clock.day + "، وفترة الأمر من " + o.data.from + " إلى " + o.data.to + "؛ راجع مسؤول التشغيل لتصحيح فترة الأمر قبل الاستلام أو الإنتاج");
 	mergeOrderShifts(inv.state, o, now);
 	let s = o.data.shifts.find((s) => s.id === clock.id);
 	if (s?.closedAt) throw Error("الشيفت الحالي مغلق؛ راجع مسؤول التشغيل");
@@ -138,85 +344,6 @@ function fruitReceiptLocation(state, id) {
 	if (transfer) return transfer.fromWarehouse;
 	if ((state.reservations || []).some((r) => r.lotId === lotId) || (state.adjustments || []).some((a) => a.lotId === lotId)) return "RAW";
 	return "PROD";
-}
-//#endregion
-//#region lib/access.ts
-var roles = {
-	admin: "مدير النظام",
-	security: "الاستقبال والأمن",
-	quality: "الجودة",
-	scale: "الميزان",
-	production: "مشرف الإنتاج",
-	warehouse: "المخازن — صلاحية عامة",
-	planner: "تخطيط الإنتاج",
-	store_main: "أمين المخزن الرئيسي",
-	store_production: "أمين مخزن الإنتاج",
-	store_finished: "أمين مخزن المنتج التام",
-	plant_manager: "مدير المصنع",
-	maintenance: "الصيانة",
-	cost_control: "مراقبة التكاليف",
-	viewer: "متابعة وتقارير"
-};
-var actualRole = (u) => u.actualRole || u.role;
-function warehouseAllowed(role, code) {
-	return !role.startsWith("store_") || role === "store_production" && code === "PROD" || role === "store_finished" && code === "FG" || role === "store_main" && !["PROD", "FG"].includes(code);
-}
-function operator(u, action) {
-	const role = actualRole(u);
-	let mapped = role;
-	const planner = [
-		"production_create",
-		"production_requirement",
-		"production_bom",
-		"production_rate"
-	];
-	const factory = [
-		"production_close",
-		"production_change_decide",
-		"production_balance_decide"
-	];
-	if (role === "planner") {
-		if (!planner.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية التخطيط");
-		mapped = "production";
-	}
-	if (role === "plant_manager") {
-		if (!factory.includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة تحتاج مسؤول القسم المختص");
-		mapped = "admin";
-	}
-	if (role.startsWith("store_")) {
-		mapped = ["inventory_accept", "inventory_transfer_accept"].includes(action) && role === "store_production" ? "production" : "warehouse";
-		if (role === "store_main" && [
-			"inventory_issue",
-			"inventory_prepare_bom",
-			"inventory_return",
-			"inventory_accept",
-			"inventory_reserve"
-		].includes(action)) throw Error("الصرف على الأمر من مسؤولية مخزن الإنتاج");
-		if (role === "store_finished" && ![
-			"cycle_receive",
-			"cycle_deliver",
-			"cycle_customer",
-			"cycle_container_return",
-			"inventory_labels",
-			"inventory_label_link",
-			"inventory_transfer",
-			"inventory_transfer_accept",
-			"inventory_transfer_cancel"
-		].includes(action) && !action.startsWith("control_")) throw Error("هذه الحركة ليست من صلاحية مخزن المنتج التام");
-	}
-	return {
-		...u,
-		actualRole: role,
-		role: mapped
-	};
-}
-function assertWarehouse(u, code) {
-	if (!warehouseAllowed(actualRole(u), code)) throw Error("المخزن خارج نطاق صلاحيتك");
-}
-function assertApprover(u, createdBy, demo) {
-	if (actualRole(u) === "admin") return;
-	if (!["plant_manager"].includes(actualRole(u))) throw Error("الاعتماد من صلاحية مدير المصنع");
-	if (!demo && u.email === createdBy) throw Error("منشئ الطلب لا يعتمد طلبه في سجل التشغيل");
 }
 //#endregion
 //#region lib/equipment.ts
@@ -12856,6 +12983,272 @@ function cycleLots(state, lots) {
 	}
 }
 //#endregion
+//#region lib/order-lifecycle.ts
+var lifecycleActions = [
+	"production_period_request",
+	"production_period_decide",
+	"production_reopen_shift",
+	"production_handover_record",
+	"production_cancel"
+];
+var date = (v) => {
+	if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0, 10) !== v) throw Error("تاريخ غير صحيح");
+	return v;
+};
+async function orderLifecycle(db, u, b) {
+	const op = b.action, role = actualRole(u);
+	if (!(op === "production_period_request" ? [
+		"admin",
+		"plant_manager",
+		"production",
+		"planner"
+	] : op === "production_handover_record" ? ["admin", "production"] : ["admin", "plant_manager"]).includes(role)) throw Error("لا توجد صلاحية لهذا الإجراء");
+	if (!Number.isSafeInteger(b.orderId) || !Number.isSafeInteger(b.version)) throw Error("رقم أمر غير صالح");
+	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), o = inv.orders.find((x) => x.id === b.orderId);
+	if (!o || o.status !== "open" || o.version !== b.version) throw Error("الأمر مغلق أو تغير؛ حدّث الصفحة");
+	const d = o.data, now = (/* @__PURE__ */ new Date()).toISOString(), clock = operatingShift(now), reason = required(b.reason, "سبب الإجراء");
+	assertScope(inv, u, { lineId: d.lineId });
+	assertDayOpen(inv, clock.day);
+	d.periodRequests ||= [];
+	d.history ||= [];
+	d.handovers ||= [];
+	let status = "open", changedInventory = false, action = "";
+	if (op === "production_period_request") {
+		const from = date(b.from), to = date(b.to);
+		if (from > to || from === d.from && to === d.to) throw Error("راجع الفترة الجديدة");
+		if (d.periodRequests.some((r) => r.status === "pending")) throw Error("يوجد طلب فترة معلق");
+		d.periodRequests.push({
+			id: crypto.randomUUID(),
+			from,
+			to,
+			previousFrom: d.from,
+			previousTo: d.to,
+			status: "pending",
+			reason,
+			by: u.email,
+			at: now
+		});
+		action = "طلب تعديل فترة الأمر";
+	}
+	if (op === "production_period_decide") {
+		const r = d.periodRequests.find((r) => r.id === b.requestId && r.status === "pending");
+		if (!r || !["A", "R"].includes(b.decision)) throw Error("طلب الفترة غير متاح");
+		assertApprover(u, r.by, demo);
+		if (b.decision === "A") {
+			if (r.previousFrom !== d.from || r.previousTo !== d.to) throw Error("تغيرت الفترة؛ قدم طلبًا جديدًا");
+			if ([
+				...d.confirmations || [],
+				...d.receipts || [],
+				...d.waste || [],
+				...d.weights || [],
+				...[
+					"issues",
+					"consumptions",
+					"packs"
+				].flatMap((k) => inv.state[k].filter((x) => x.orderId === o.id))
+			].some((x) => {
+				const day = x.day || (x.at ? operatingShift(x.at).day : null);
+				return day && (day < r.from || day > r.to);
+			})) throw Error("الفترة الجديدة تستبعد حركات تنفيذ مسجلة");
+			if (d.type !== "Filling" && inv.orders.some((x) => x.id !== o.id && !x.data.cancelledAt && x.data.type !== "Filling" && x.data.code === d.code && x.data.from <= r.to && x.data.to >= r.from)) throw Error("تداخل مع أمر بلك لنفس المنتج");
+			d.periodHistory ||= [];
+			d.periodHistory.push({
+				from: d.from,
+				to: d.to,
+				newFrom: r.from,
+				newTo: r.to,
+				at: now,
+				by: u.email,
+				reason
+			});
+			d.from = r.from;
+			d.to = r.to;
+		}
+		Object.assign(r, {
+			status: b.decision === "A" ? "approved" : "rejected",
+			decision: b.decision,
+			decidedAt: now,
+			decidedBy: u.email,
+			decisionReason: reason
+		});
+		action = "قرار تعديل فترة الأمر";
+	}
+	if (op === "production_reopen_shift") {
+		const s = d.shifts.find((s) => s.id === b.shiftId);
+		if (!s?.closedAt || !s.automatic || s.id !== clock.id) throw Error("يمكن إعادة فتح الشيفت الحالي فقط");
+		if (clock.day < d.from || clock.day > d.to) throw Error("اعتمد تعديل فترة الأمر أولًا");
+		s.reopenHistory ||= [];
+		s.reopenHistory.push({
+			closedAt: s.closedAt,
+			closedBy: s.closedBy,
+			at: now,
+			by: u.email,
+			reason
+		});
+		Object.assign(s, {
+			closedAt: null,
+			closedBy: null,
+			autoEnded: false
+		});
+		for (const h of d.handovers.filter((h) => h.shiftId === s.id && !h.supersededAt)) Object.assign(h, {
+			supersededAt: now,
+			supersededBy: u.email,
+			supersededReason: reason
+		});
+		inv.state.operationShifts = (inv.state.operationShifts || []).filter((x) => x.orderId !== o.id || x.id !== s.id);
+		inv.state.operationShifts.push({
+			...s,
+			orderId: o.id
+		});
+		changedInventory = true;
+		action = "إعادة فتح الشيفت الحالي";
+	}
+	if (op === "production_handover_record") {
+		const s = d.shifts.find((s) => s.id === b.shiftId);
+		if (!s?.closedAt) throw Error("اختر شيفتًا منتهيًا");
+		assertDayOpen(inv, s.day);
+		if (d.handovers.some((h) => h.shiftId === s.id && !h.supersededAt)) throw Error("يوجد تسليم مسجل لهذا الشيفت");
+		const resources = {};
+		for (const key of [
+			"laborHours",
+			"machineHours",
+			"electricity",
+			"steam",
+			"water"
+		]) {
+			const v = b[key];
+			resources[key] = v == null || v === "" ? null : Number(v);
+			if (resources[key] !== null && (!Number.isFinite(resources[key]) || resources[key] < 0 || resources[key] > 1e9)) throw Error("قيمة مورد غير صحيحة");
+		}
+		d.handovers.push({
+			id: "HO-" + crypto.randomUUID(),
+			shiftId: s.id,
+			day: s.day,
+			notes: reason,
+			resources,
+			remaining: [],
+			lateEntry: true,
+			at: now,
+			by: u.email
+		});
+		action = "تسجيل تسليم شيفت منتهي";
+	}
+	if (op === "production_cancel") {
+		if (d.automaticFilling) throw Error("استخدم إلغاء مسودة التعبئة التلقائية");
+		if ([
+			"confirmations",
+			"receipts",
+			"waste",
+			"weights",
+			"packaging"
+		].some((k) => d[k]?.length) || [
+			"issues",
+			"consumptions",
+			"packs"
+		].some((k) => inv.state[k].some((x) => x.orderId === o.id))) throw Error("لا يمكن إلغاء أمر بدأت عليه حركات تنفيذ");
+		if (inv.orders.some((x) => x.data.sourceOrderId === o.id && !x.data.cancelledAt)) throw Error("ألغِ أوامر التعبئة التابعة أولًا");
+		if ((inv.state.transfers || []).some((t) => !t.receivedAt && !t.cancelledAt && (t.allocations || []).some((a) => a.orderId === o.id))) throw Error("ألغِ التحويلات المعلقة المرتبطة بالأمر أولًا");
+		for (const r of inv.state.reservations.filter((x) => x.orderId === o.id && x.remaining > 0)) {
+			const l = inv.lots.find((l) => l.id === r.lotId);
+			if (l) assertScope(inv, u, { warehouse: l.warehouse });
+			Object.assign(r, {
+				remaining: 0,
+				releasedAt: now,
+				releasedBy: u.email
+			});
+		}
+		for (const p of inv.state.preparations.filter((x) => x.orderId === o.id && x.quantity > x.received + x.cancelled)) {
+			assertScope(inv, u, { warehouse: p.warehouse });
+			Object.assign(p, {
+				cancelled: p.quantity - p.received,
+				cancelledAt: now,
+				cancelledBy: u.email,
+				reason
+			});
+		}
+		for (const r of inv.state.supplyRequests.filter((x) => x.orderId === o.id && !x.cancelledAt)) Object.assign(r, {
+			cancelledAt: now,
+			cancelledBy: u.email,
+			reason
+		});
+		for (const r of controls(inv.state).requests.filter((x) => x.orderId === o.id && x.status === "pending")) Object.assign(r, {
+			status: "cancelled",
+			cancelledAt: now,
+			cancelledBy: u.email,
+			reason
+		});
+		Object.assign(d, {
+			cancelledAt: now,
+			cancelledBy: u.email,
+			cancelReason: reason
+		});
+		status = "closed";
+		changedInventory = true;
+		action = "إلغاء أمر غير مستخدم";
+	}
+	d.history.push({
+		at: now,
+		by: u.email,
+		action,
+		reason
+	});
+	const token = crypto.randomUUID();
+	d.lifecycleToken = token;
+	let sql = "UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND demo=? AND status='open' AND version=? AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=?";
+	const args = [
+		JSON.stringify(d),
+		status,
+		o.id,
+		demo,
+		o.version,
+		demo,
+		inv.version
+	];
+	if (op === "production_period_decide" && b.decision === "A" && d.type !== "Filling") {
+		sql += " AND NOT EXISTS (SELECT 1 FROM production_orders other WHERE other.id<>? AND other.demo=? AND json_extract(other.data,'$.cancelledAt') IS NULL AND json_extract(other.data,'$.type') IN ('Bulk','PI01') AND json_extract(other.data,'$.code')=? AND json_extract(other.data,'$.from')<=? AND json_extract(other.data,'$.to')>=?)";
+		args.push(o.id, demo, d.code, d.to, d.from);
+	}
+	if (changedInventory) {
+		if (!db.batch) throw Error("الإجراء يحتاج خادمًا يدعم الحفظ الذري");
+		inv.state.history.push({
+			at: now,
+			by: u.email,
+			action,
+			reason,
+			orderId: o.id
+		});
+		const guard = " AND EXISTS (SELECT 1 FROM production_orders WHERE id=? AND demo=? AND version=? AND json_extract(data,'$.lifecycleToken')=?)", g = [
+			o.id,
+			demo,
+			o.version + 1,
+			token
+		];
+		const invSql = inv.version === 0 ? "INSERT OR IGNORE INTO inventory(id,version,data) SELECT ?,1,? WHERE 1=1" + guard : "UPDATE inventory SET data=?,version=version+1 WHERE id=? AND version=?" + guard;
+		const invArgs = inv.version === 0 ? [
+			demo,
+			JSON.stringify(inv.state),
+			...g
+		] : [
+			JSON.stringify(inv.state),
+			demo,
+			inv.version,
+			...g
+		];
+		const saved = await db.batch([{
+			sql,
+			args
+		}, {
+			sql: invSql,
+			args: invArgs
+		}]);
+		if (saved.length !== 2 || saved.some((x) => x.changes !== 1)) throw Error("تغير الأمر أو المخزون؛ حدّث الصفحة");
+	} else if (!(await db.run(sql, args)).changes) throw Error("تغير الأمر أو المخزون؛ حدّث الصفحة");
+	return {
+		ok: true,
+		orderId: o.id
+	};
+}
+//#endregion
 //#region lib/packing-plan.ts
 function packingPlan(code, target, materials, policy = "partial") {
 	const plan = bomPlan(code, target, materials);
@@ -12970,7 +13363,12 @@ async function createEarlyPacking(db, inv, data, bulkSql, bulkArgs, demo, actor,
 	const state = inv.state;
 	const available = /* @__PURE__ */ new Map();
 	const lots = inv.lots.filter((l) => ["PROD", "PACK"].includes(l.warehouse) && l.quality === "A" && !l.warehousePending && !l.expired && l.available > 0).sort((a, b) => Number(b.warehouse === "PROD") - Number(a.warehouse === "PROD") || String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)));
-	for (const l of lots) available.set(l.id, l.available);
+	for (const l of lots) try {
+		assertScope(inv, actor, { warehouse: l.warehouse });
+		available.set(l.id, l.available);
+	} catch {
+		available.set(l.id, 0);
+	}
 	for (const need of p.shift?.inputs || p.inputs) {
 		let left = need.quantity;
 		for (const l of lots.filter((l) => l.code === need.code && l.unit === need.unit)) {
@@ -13107,6 +13505,7 @@ var decodeOrder = (r) => {
 	};
 };
 async function productionOperation(db, u, b) {
+	if (lifecycleActions.includes(b.action)) return orderLifecycle(db, u, b);
 	u = operator(u, b.action);
 	const now = (/* @__PURE__ */ new Date()).toISOString(), fastOutput = b.action === "production_confirm_usage", op = fastOutput ? "production_confirm" : b.action, permissions = {
 		production_rate: ["production"],
@@ -13211,7 +13610,7 @@ async function productionOperation(db, u, b) {
 				} });
 			}
 		}
-		let insertSql = `INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`;
+		let insertSql = `INSERT INTO production_orders(demo,version,status,data) SELECT ?,1,'open',json_set(?, '$.serial',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1,'$.number',? || printf('%07d',COALESCE(MAX(CAST(json_extract(data,'$.serial') AS INTEGER)),0)+1)) FROM production_orders WHERE json_extract(data,'$.type')=? HAVING ?='Filling' OR NOT EXISTS (SELECT 1 FROM production_orders prior WHERE prior.demo=? AND json_extract(prior.data,'$.cancelledAt') IS NULL AND json_extract(prior.data,'$.type') IN ('Bulk','PI01') AND json_extract(prior.data,'$.code')=? AND json_extract(prior.data,'$.from')<=? AND json_extract(prior.data,'$.to')>=?)`;
 		const insertArgs = [
 			b.demo === true ? 1 : 0,
 			JSON.stringify(data),
@@ -13234,7 +13633,7 @@ async function productionOperation(db, u, b) {
 		}
 		const result = await db.run(insertSql, insertArgs);
 		if (!result.changes) {
-			const conflict = await db.first("SELECT * FROM production_orders WHERE demo=? AND json_extract(data,'$.type') IN ('Bulk','PI01') AND json_extract(data,'$.code')=? AND json_extract(data,'$.from')<=? AND json_extract(data,'$.to')>=? ORDER BY id LIMIT 1", [
+			const conflict = await db.first("SELECT * FROM production_orders WHERE demo=? AND json_extract(data,'$.cancelledAt') IS NULL AND json_extract(data,'$.type') IN ('Bulk','PI01') AND json_extract(data,'$.code')=? AND json_extract(data,'$.from')<=? AND json_extract(data,'$.to')>=? ORDER BY id LIMIT 1", [
 				b.demo === true ? 1 : 0,
 				m.code,
 				to,
@@ -13402,6 +13801,7 @@ async function productionOperation(db, u, b) {
 	}
 	if (op === "production_close_shift") {
 		const s = openShift();
+		assertDayOpen(inv, s.day);
 		if (d.cycleVersion >= 4) {
 			const metric = (v) => {
 				if (v == null || v === "") return null;
@@ -13411,6 +13811,7 @@ async function productionOperation(db, u, b) {
 			};
 			d.handovers ||= [];
 			d.handovers.push({
+				...shiftMetadata(now),
 				id: "HO-" + (d.handovers.length + 1),
 				shiftId: s.id,
 				day: s.day,
@@ -13437,7 +13838,7 @@ async function productionOperation(db, u, b) {
 		action = "إغلاق الشفت " + s.name;
 	}
 	if (op === "production_handover_accept") {
-		const h = (d.handovers || []).find((h) => h.id === b.handoverId && !h.acceptedAt);
+		const h = (d.handovers || []).find((h) => h.id === b.handoverId && !h.acceptedAt && !h.supersededAt);
 		if (!h) throw Error("تسليم الشفت غير متاح");
 		if (!raw.demo && h.by === u.email && actualRole(u) !== "admin") throw Error("استلام الشفت بواسطة مستخدم آخر");
 		h.acceptedAt = now;
@@ -13650,12 +14051,13 @@ async function productionOperation(db, u, b) {
 		action = "جودة " + c.id + " — " + b.decision;
 	}
 	if (op === "production_close") {
+		if (d.cycleVersion >= 4 && d.shifts.some((s) => !(d.handovers || []).some((h) => h.shiftId === s.id && !h.supersededAt))) throw Error("سجل تسليم كل شيفت قبل إغلاق الأمر");
 		if ((inv.state.automaticFillingJobs || []).some((j) => j.parentOrderId === order.id && j.planned && j.status === "waiting_quality")) throw Error("ألغِ مسودة التعبئة المبكرة غير المستخدمة قبل إغلاق البلك");
 		if (d.cycleVersion >= 4) {
 			const totals = balanceTotals(), bal = d.processBalance;
 			if (d.confirmations.some((c) => c.unit === "KG") && (!bal || bal.input !== totals.input || bal.main !== totals.main || bal.byproducts !== totals.byproducts || bal.difference !== 0 && !bal.approvedAt)) throw Error("راجع موازنة التصنيع واعتمد فرقها قبل الإغلاق");
 			if (!["admin", "plant_manager"].includes(actualRole(u))) throw Error("الإغلاق النهائي من صلاحية مدير المصنع");
-			if ((d.handovers || []).some((h) => !h.acceptedAt)) throw Error("استكمل استلام تسليمات الشفتات");
+			if ((d.handovers || []).some((h) => !h.acceptedAt && !h.supersededAt)) throw Error("استكمل استلام تسليمات الشفتات");
 			for (const used of inv.state.consumptions.filter((c) => c.orderId === raw.id && !c.reversedAt)) if (controls(inv.state).trace.filter((t) => t.consumptionId === used.id).reduce((n, t) => n + t.quantity, 0) < used.quantity) throw Error("وزّع الاستهلاك على باتشات الناتج قبل الإغلاق");
 		}
 		if (d.cycleVersion >= 2 && wipRows(inv, raw.id).some((r) => r.remaining > 0)) throw Error("سوِّ المواد المتبقية لدى الإنتاج بالاستهلاك أو المرتجع");
@@ -14203,7 +14605,7 @@ async function inventoryOperation(db, u, b) {
 		if (!order || order.status !== "open" || order.version !== b.orderVersion) throw Error("اختر أمرًا مفتوحًا وحدّث بياناته");
 		assertReleased(inv, order);
 		assertScope(inv, u, { lineId: order.data.lineId });
-		ensureAutoShift(inv, order, u, now);
+		if (op === "inventory_accept") ensureAutoShift(inv, order, u, now);
 	}
 	const lot = inv.lots.find((l) => l.id === b.lotId), material = inv.materials.find((m) => m.code === b.code);
 	const needLot = () => {
@@ -14339,6 +14741,11 @@ async function inventoryOperation(db, u, b) {
 	if (op === "inventory_release") {
 		const r = d.reservations.find((r) => r.id === b.reservationId && r.orderId === order.id && r.remaining > 0);
 		if (!r) throw Error("الحجز غير متاح");
+		const held = inv.lots.find((l) => l.id === r.lotId);
+		if (held) {
+			assertWarehouse(u, held.warehouse);
+			assertScope(inv, u, { warehouse: held.warehouse });
+		}
 		r.remaining = 0;
 		r.releasedAt = now;
 		r.releasedBy = u.email;
@@ -14475,6 +14882,8 @@ async function inventoryOperation(db, u, b) {
 	if (op === "inventory_return") {
 		const issue = d.issues.find((i) => i.id === b.issueId && i.orderId === order.id);
 		if (!issue) throw Error("اختر حركة صرف من الأمر");
+		assertWarehouse(u, issue.warehouse);
+		assertScope(inv, u, { warehouse: issue.warehouse });
 		const amount = qty(b.quantity);
 		const wip = wipRows(inv, order.id).find((r) => r.id === issue.id);
 		if (wip && amount > wip.free) throw Error("المرتجع يتجاوز المتبقي لدى الإنتاج");
@@ -14695,7 +15104,7 @@ async function groupedInventoryOperation(db, user, b) {
 		if (total > round$1(remainingRequirement(inv, o, code) - pending)) throw Error("المجموعة تتجاوز متبقي احتياج المادة " + code);
 	}
 	for (const [lotId, total] of lotTotals) if (total > inv.lots.find((l) => l.id === lotId).balance) throw Error("مجموع البنود يتجاوز الرصيد الفعلي للباتش");
-	const shift = ensureAutoShift(inv, o, u, now);
+	const shift = prepare ? operatingShift(now) : ensureAutoShift(inv, o, u, now);
 	assertDayOpen(inv, shift.day);
 	for (const { l } of rows) assertUsable(l, dateInCairo(now));
 	for (const { l, p, quantity } of rows) if (prepare) {
@@ -15223,7 +15632,8 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 		if (!job || job.planned || [
 			"completed",
 			"cancelled",
-			"rejected"
+			"rejected",
+			"manual"
 		].includes(job.status)) return job || null;
 		const child = inv.orders.find((o) => o.data.automaticFilling?.key === key), parent = inv.orders.find((o) => o.id === job.parentOrderId), source = inv.lots.find((l) => l.id === job.sourceLotId);
 		if (!child || !parent || !source) return job;
@@ -15282,6 +15692,10 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 					const allocation = planAllocations(inv, child, source);
 					if (allocation.shortages.length) setJob(job, "shortage", "", allocation.shortages);
 					else {
+						for (const { lot } of allocation.lines) assertScope(inv, {
+							email: job.by,
+							role: job.authorizationRole
+						}, { warehouse: lot.warehouse });
 						const clock = operatingShift(now);
 						if (child.data.shifts.some((s) => s.id === clock.id && s.closedAt)) throw Error("الشيفت الحالي مغلق على أمر التعبئة");
 						mutationStarted = true;
@@ -15383,6 +15797,7 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 							});
 						}
 						clearEarlyPacking(state, key, now, trigger.email);
+						delete job.lastError;
 						setJob(job, "completed");
 						job.executedAt = now;
 						job.executedBy = trigger.email;
@@ -15428,13 +15843,45 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 	throw Error("تعارض تحديث التعبئة التلقائية؛ أعد المحاولة");
 }
 async function processAutomaticFilling(db, trigger, demo, event = {}) {
-	const queue = jobs((await inventorySnapshot(db, demo)).state).filter((j) => ![
+	const inv = await inventorySnapshot(db, demo), queue = jobs(inv.state).filter((j) => ![
 		"completed",
 		"cancelled",
-		"rejected"
+		"rejected",
+		"manual"
 	].includes(j.status) && (!event.parentOrderId || j.parentOrderId === event.parentOrderId) && (!event.sourceLotId || j.sourceLotId === event.sourceLotId) && (!event.key || j.key === event.key));
 	const results = [];
-	for (const job of queue) results.push(await runAutomaticFilling(db, demo, job.key, trigger));
+	for (const job of queue) {
+		const parent = inv.orders.find((o) => o.id === job.parentOrderId);
+		if (parent) try {
+			assertScope(inv, trigger, { lineId: parent.data.lineId });
+		} catch {
+			continue;
+		}
+		try {
+			results.push(await runAutomaticFilling(db, demo, job.key, trigger));
+		} catch {
+			const message = "تعذر إكمال المحاولة؛ حدّث البيانات ثم أعد المحاولة";
+			const fresh = await inventorySnapshot(db, demo), current = jobs(fresh.state).find((j) => j.key === job.key), child = fresh.orders.find((o) => o.data.automaticFilling?.key === job.key), parent = fresh.orders.find((o) => o.id === job.parentOrderId);
+			if (current && child && parent && ![
+				"completed",
+				"cancelled",
+				"rejected",
+				"manual"
+			].includes(current.status)) {
+				current.lastError = message;
+				current.lastAttemptAt = (/* @__PURE__ */ new Date()).toISOString();
+				current.failedAttempts = (current.failedAttempts || 0) + 1;
+				try {
+					await saveJob(db, fresh, child, parent, current.lastAttemptAt);
+				} catch {}
+			}
+			results.push({
+				key: job.key,
+				status: "blocked",
+				detail: message
+			});
+		}
+	}
 	return results;
 }
 async function safeAutomaticFilling(db, trigger, demo, event = {}) {
@@ -15445,11 +15892,38 @@ async function safeAutomaticFilling(db, trigger, demo, event = {}) {
 	}
 }
 async function automaticFillingOperation(db, u, b) {
-	if (!["admin", "production"].includes(actualRole(u))) throw Error("متابعة وتعديل التعبئة التلقائية من صلاحية الإنتاج");
+	if (!(b.action === "auto_filling_manual" ? ["admin", "plant_manager"] : ["admin", "production"]).includes(actualRole(u))) throw Error("متابعة وتعديل التعبئة التلقائية من صلاحية الإنتاج");
 	const demo = b.demo === true ? 1 : 0, inv = await inventorySnapshot(db, demo), child = inv.orders.find((o) => o.id === b.orderId), job = jobs(inv.state).find((j) => j.key === child?.data.automaticFilling?.key);
 	if (!child || child.status !== "open" || !job) throw Error("أمر التعبئة التلقائي غير متاح");
 	assertScope(inv, u, { lineId: child.data.lineId });
 	if (b.inventoryVersion !== inv.version || b.version !== child.version) throw Error("تغير الأمر أو المخزون؛ حدّث البيانات");
+	if (b.action === "auto_filling_manual") {
+		if (job.status !== "manual_review") throw Error("التحويل اليدوي متاح للأوامر التي تتطلب مراجعة يدوية فقط");
+		assertApprover(u, job.by, demo);
+		const source = inv.lots.find((l) => l.id === job.sourceLotId);
+		if (!source || source.quality !== "A" || source.warehousePending) throw Error("استكمل جودة واستلام البلك أولًا");
+		if (!child.data.code || !source.allowedFinishedCodes?.includes(child.data.code)) throw Error("اختر منتجًا اعتمدته جودة البلك");
+		const now = (/* @__PURE__ */ new Date()).toISOString(), reason = required(b.reason, "سبب التحويل للتنفيذ اليدوي"), parent = inv.orders.find((o) => o.id === job.parentOrderId);
+		assertDayOpen(inv, operatingShift(now).day);
+		child.data.automaticFillingManual = {
+			...child.data.automaticFilling,
+			at: now,
+			by: u.email,
+			reason
+		};
+		delete child.data.automaticFilling;
+		setJob(job, "manual", reason);
+		job.updatedAt = now;
+		job.updatedBy = u.email;
+		child.data.history.push({
+			at: now,
+			by: u.email,
+			action: "تحويل التعبئة للتنفيذ اليدوي",
+			reason
+		});
+		if (!parent || !await saveJob(db, inv, child, parent, now)) throw Error("تعارض تحديث الأمر؛ حدّث الصفحة");
+		return { ok: true };
+	}
 	if (b.action === "auto_filling_cancel") {
 		if (job.status === "completed" || inv.state.issues.some((i) => i.orderId === child.id) || inv.state.reservations.some((r) => r.orderId === child.id && r.remaining > 0 && r.earlyPackingKey !== job.key) || inv.state.preparations.some((p) => p.orderId === child.id && p.quantity > p.cancelled)) throw Error("لا يمكن إلغاء المسودة بعد بدء صرف المواد أو حجزها");
 		const now = (/* @__PURE__ */ new Date()).toISOString(), parent = inv.orders.find((o) => o.id === job.parentOrderId), reason = required(b.reason, "سبب إلغاء مسودة التعبئة");
@@ -15708,11 +16182,18 @@ async function controlOperation(db, u, b) {
 	const order = (oid) => {
 		const o = inv.orders.find((o) => o.id === Number(oid));
 		if (!o) throw Error("الأمر غير موجود");
+		assertScope(inv, u, { lineId: o.data.lineId });
 		return o;
 	};
 	const lot = (lid) => {
 		const l = inv.lots.find((l) => l.id === lid);
 		if (!l) throw Error("الباتش غير موجود");
+		assertWarehouse(u, l.warehouse);
+		assertScope(inv, u, { warehouse: l.warehouse });
+		if (l.orderId) {
+			const source = inv.orders.find((o) => o.id === l.orderId);
+			if (source) assertScope(inv, u, { lineId: source.data.lineId });
+		}
 		return l;
 	};
 	const base = {
@@ -15742,6 +16223,8 @@ async function controlOperation(db, u, b) {
 			for (const l of options) {
 				const amount = round$1(Math.min(left, l.available));
 				if (amount <= 0) continue;
+				assertWarehouse(u, l.warehouse);
+				assertScope(inv, u, { warehouse: l.warehouse });
 				d.reservations.push({
 					id: "RES-" + crypto.randomUUID(),
 					orderId: o.id,
@@ -16215,7 +16698,15 @@ async function controlOperation(db, u, b) {
 		inv.version,
 		...args
 	])).changes) throw Error("تغيرت البيانات؛ حدّث الصفحة وأعد المحاولة");
-	return { ok: true };
+	return {
+		ok: true,
+		...[
+			"control_equipment_status",
+			"control_equipment_quality",
+			"control_incident_close",
+			"control_day_reopen"
+		].includes(op) ? await safeAutomaticFilling(db, u, demo) : {}
+	};
 }
 //#endregion
 //#region lib/chemical-limits.ts
@@ -16524,7 +17015,13 @@ async function warehouseCycle(db, u, b) {
 		assertReleased(inv, o);
 		assertScope(inv, u, { lineId: o.data.lineId });
 		guardOrder = o;
-		ensureAutoShift(inv, o, u, now);
+		if (![
+			"cycle_request",
+			"cycle_cancel_request",
+			"cycle_return_request",
+			"cycle_cancel_return",
+			"cycle_return_accept"
+		].includes(op)) ensureAutoShift(inv, o, u, now);
 		return o;
 	};
 	const workingIssue = () => {
@@ -16731,6 +17228,8 @@ async function warehouseCycle(db, u, b) {
 		const r = d.returnRequests.find((r) => r.id === b.requestId && !r.acceptedAt && !r.cancelledAt);
 		if (!r) throw Error("طلب المرتجع غير متاح");
 		order(r.orderId);
+		assertWarehouse(u, r.warehouse);
+		assertScope(inv, u, { warehouse: r.warehouse });
 		const i = wipRows(inv, r.orderId).find((i) => i.id === r.issueId);
 		if (!i || r.quantity > i.remaining) throw Error("المرتجع يتجاوز المتبقي لدى الإنتاج");
 		r.acceptedAt = now;
@@ -17193,4 +17692,4 @@ function normalizePlate(value) {
 var createTicketSql = `INSERT INTO tickets (demo,version,status,data,history,created_at) SELECT ?,1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM tickets WHERE demo=? AND coalesce(json_extract(data,'$.plateKey'),${plateReplacements.reduce((sql, [a, b]) => `replace(${sql},'${a}','${b}')`, "lower(json_extract(data,'$.plate'))")})=? AND created_at>?)`;
 var duplicatePlateMessage = "السيارة مسجلة بالفعل خلال آخر 4 ساعات. افتح التذكرة الحالية لاستكمال الإجراءات، أو أعد التسجيل بعد انقضاء المدة.";
 //#endregion
-export { assignTicketOrder, automaticFillingOperation, completeFruitReceipt, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, groupedInventoryOperation, inventoryOperation, inventorySnapshot, labelBatchChoices, nextOutputBatch, normalizePlate, operatingShift, productionOperation, receivingOperation, roles, shiftMetadata, stages, statuses, text, transition, validateCatalog, warehouseCycle };
+export { assignTicketOrder, automaticFillingOperation, completeFruitReceipt, controlOperation, createData, createTicketSql, decodeOrder, defaultCatalog, documentNumber, duplicatePlateMessage, groupedInventoryOperation, inventoryOperation, inventorySnapshot, labelBatchChoices, nextOutputBatch, normalizePlate, operatingShift, productionOperation, receivingOperation, roles, scopedOperations, shiftMetadata, stages, statuses, text, transition, validateCatalog, warehouseCycle };
