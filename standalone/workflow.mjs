@@ -13879,8 +13879,7 @@ async function productionOperation(db, u, b) {
 				if (accepted.filter((i) => i.code === r.code).reduce((n, i) => n + netIssue(i), 0) + 1e-4 < required) throw Error("استكمل استلام مكونات مخطط الصرف للكمية المنتجة: " + r.code);
 			}
 			if (d.type === "Bulk") {
-				required(b.cipRef, "مرجع دورة CIP");
-				if (d.cycleVersion >= 4) {
+				if (d.cycleVersion >= 4 && b.cipId) {
 					const cip = controls(inv.state).cip.find((r) => r.id === b.cipId && r.lineId === d.lineId && r.decision === "A");
 					const line = controls(inv.state).machines.find((m) => m.id === d.lineId);
 					if (!cip || cip.end < (line?.statusAt || "") || operatingShift(cip.end).day !== s.day) throw Error("اختر دورة CIP معتمدة لنفس الخط ويوم التشغيل بعد آخر صيانة");
