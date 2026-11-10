@@ -13858,7 +13858,7 @@ async function productionOperation(db, u, b) {
 			unit: d.unit || "KG"
 		} : inv.materials.find((m) => m.code === b.code && m.category === "byproduct");
 		if (!m || masterData.conflicts.some((x) => x.code === m.code)) throw Error("اختر مادة ناتج جانبي غير متعارضة من الدليل");
-		const warehouse = b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
+		const directBulk = d.type === "Bulk" && b.kind === "main", warehouse = directBulk ? "PROD" : b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
 		if (!inv.warehouses.some((w) => w.code === warehouse)) throw Error("اختر مخزن الناتج");
 		if (b.batch && inv.lots.some((l) => l.code === m.code && l.batch === b.batch)) throw Error("الباتش مستخدم لهذا المنتج");
 		const amount = qty(b.quantity);
@@ -13906,14 +13906,15 @@ async function productionOperation(db, u, b) {
 			unit: m.unit,
 			warehouse,
 			quantity: qty(b.quantity),
-			requiresWarehouseReceipt: true,
+			directBulk,
+			requiresWarehouseReceipt: !directBulk,
 			batch: b.batch ? required(b.batch, "الباتش") : d.type === "Filling" && b.kind === "main" ? nextOutputBatch(inv, order) : order.batch + "-CF-" + (d.confirmations.length + 1),
 			stock: b.kind === "main" ? "Quality Stock" : "Unrestricted Stock",
 			at: now,
 			by: u.email,
 			decision: null
 		});
-		action = "تسجيل ناتج إلى المخزن";
+		action = directBulk ? "تسجيل بلك للتعبئة المباشرة" : "تسجيل ناتج إلى المخزن";
 	}
 	if (op === "production_weigh") {
 		const c = d.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
@@ -14028,7 +14029,15 @@ async function productionOperation(db, u, b) {
 			if (!Array.isArray(b.allowedFinishedCodes) || !b.allowedFinishedCodes.length || b.allowedFinishedCodes.some((code) => !options.some((m) => m.code === code))) throw Error("حدد المنتجات المعبأة المتوافقة مع نتيجة هذا الباتش");
 			allowedFinishedCodes = [...new Set(b.allowedFinishedCodes)];
 		}
+		let selectedFillingCode = "";
+		if (allowedFinishedCodes) {
+			selectedFillingCode = String(b.fillingCode || "").trim();
+			if (selectedFillingCode && !allowedFinishedCodes.includes(selectedFillingCode)) throw Error("اختر صنف التعبئة من المنتجات المعتمدة لهذا اللون");
+			if (!selectedFillingCode) selectedFillingCode = allowedFinishedCodes.includes(c.plannedFillingCode) ? c.plannedFillingCode : allowedFinishedCodes.length === 1 ? allowedFinishedCodes[0] : "";
+			if (!selectedFillingCode) throw Error("حدد صنف التعبئة المطلوب ضمن قرار الجودة");
+		}
 		Object.assign(c, {
+			selectedFillingCode,
 			...validateQualityApproval(b),
 			...qualityDisposition(b),
 			allowedFinishedCodes,
@@ -14080,7 +14089,17 @@ async function productionOperation(db, u, b) {
 		applyOutputUsage(inv, order, d.confirmations[d.confirmations.length - 1], b, u, now);
 		action = "تسجيل ناتج واستهلاك فعلي في عملية واحدة";
 	}
-	const automaticDraft = op === "production_confirm" ? prepareAutomaticFilling(inv, order, d.confirmations[d.confirmations.length - 1], b, u, now) : null;
+	const inspected = op === "production_quality" ? d.confirmations.find((c) => c.id === b.confirmationId) : null;
+	const createFromQuality = inspected?.kind === "main" && d.type === "Bulk" && b.decision === "A" && !(inv.state.automaticFillingJobs || []).some((j) => j.parentOrderId === order.id && j.confirmationId === inspected.id) && !inv.orders.some((o) => o.data.sourceOrderId === order.id && (o.data.sourceLotId === "P-" + order.id + "-" + inspected.id || o.data.sourceOriginLotId === "P-" + order.id + "-" + inspected.id));
+	const automaticConfirmation = createFromQuality ? inspected : d.confirmations[d.confirmations.length - 1];
+	const automaticDraft = op === "production_confirm" && d.type === "Bulk" && b.kind === "main" || createFromQuality ? prepareAutomaticFilling(inv, order, automaticConfirmation, {
+		...b,
+		autoFilling: true,
+		fillingCode: createFromQuality ? inspected.selectedFillingCode : b.fillingCode
+	}, createFromQuality ? {
+		email: inspected.by || u.email,
+		role: "production"
+	} : u, now) : null;
 	d.history.push({
 		at: now,
 		by: u.email,
@@ -14088,7 +14107,7 @@ async function productionOperation(db, u, b) {
 	});
 	tagNewMovements(d, now);
 	if (automaticDraft) {
-		const c = d.confirmations[d.confirmations.length - 1], result = {
+		const c = automaticConfirmation, result = {
 			ok: true,
 			orderId: order.id,
 			confirmationId: c.id,
@@ -14101,7 +14120,11 @@ async function productionOperation(db, u, b) {
 			d.lastFastOutputKey = fastKey(b);
 			rememberFast(inv, b, u, result, now);
 		}
-		return commitAutomaticOutput(db, inv, order, automaticDraft, result, now, b, u);
+		const saved = await commitAutomaticOutput(db, inv, order, automaticDraft, result, now, b, u);
+		return createFromQuality ? {
+			...saved,
+			...await safeAutomaticFilling(db, u, raw.demo, { parentOrderId: raw.id })
+		} : saved;
 	}
 	if (fastOutput) return commitOutputUsage(db, inv, order, b, u, now);
 	if (!(await db.run("UPDATE production_orders SET data=?,status=?,version=version+1 WHERE id=? AND version=? AND COALESCE((SELECT version FROM inventory WHERE id=?),0)=?", [
@@ -14422,13 +14445,13 @@ async function inventorySnapshot(db, demo) {
 		});
 	}
 	for (const o of os) for (const c of o.data.confirmations || []) {
-		const category = c.kind === "main" ? o.data.type === "Filling" ? "finished" : "semi" : "byproduct";
+		const directBulk = o.data.type === "Bulk" && c.kind === "main" && (c.directBulk === true || c.requiresWarehouseReceipt === true) && !state.warehouseReceipts.some((r) => r.lotId === "P-" + o.id + "-" + c.id), category = c.kind === "main" ? o.data.type === "Filling" ? "finished" : "semi" : "byproduct";
 		add({
 			code: c.code,
 			name: c.name,
 			category,
 			unit: c.unit || o.data.unit || "KG",
-			warehouse: c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI")
+			warehouse: directBulk ? "PROD" : c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI")
 		});
 		lots.push({
 			id: "P-" + o.id + "-" + c.id,
@@ -14436,10 +14459,11 @@ async function inventorySnapshot(db, demo) {
 			name: c.name,
 			category,
 			unit: c.unit || o.data.unit || "KG",
-			warehouse: c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI"),
+			warehouse: directBulk ? "PROD" : c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI"),
 			batch: c.batch,
 			quantity: c.quantity,
-			requiresWarehouseReceipt: c.requiresWarehouseReceipt === true,
+			directBulk,
+			requiresWarehouseReceipt: !directBulk && c.requiresWarehouseReceipt === true,
 			legacy: 0,
 			quality: c.kind === "byproduct" && (o.data.cycleVersion || 0) < 3 ? "A" : c.decision || "H",
 			color: c.color || c.colorDescription || "",
@@ -15596,11 +15620,11 @@ function setJob(job, status, detail = "", shortages = []) {
 }
 function planAllocations(inv, child, source) {
 	const lines = [], shortages = [], own = (lotId) => inv.state.reservations.filter((r) => r.orderId === child.id && r.lotId === lotId && r.remaining > 0).reduce((n, r) => n + r.remaining, 0);
-	const all = inv.lots.filter((l) => l.quality === "A" && !l.warehousePending && !l.expired), available = new Map(all.map((l) => [l.id, round$1(l.available + own(l.id))]));
+	const all = inv.lots.filter((l) => l.quality === "A" && !l.warehousePending && !l.expired), available = new Map(all.map((l) => [l.id, round$1(l.available + own(l.id) + inv.state.transfers.filter((t) => t.earlyPackingKey === child.data.automaticFilling.key && t.sourceLotId === l.id && !t.receivedAt && !t.cancelledAt).reduce((n, t) => n + t.quantity, 0))]));
 	for (const need of child.data.requirements) {
 		let left = need.quantity;
 		const semi = inv.materials.find((m) => m.code === need.code)?.category === "semi";
-		const choices = all.filter((l) => l.code === need.code && l.unit === need.unit && (semi ? l.id === source.id || (l.originLotId || l.id) === source.id : l.warehouse === "PROD")).sort((a, b) => (a.warehouse === "PROD" ? 0 : 1) - (b.warehouse === "PROD" ? 0 : 1) || String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)) || a.id.localeCompare(b.id));
+		const choices = all.filter((l) => l.code === need.code && l.unit === need.unit && (semi ? l.id === source.id || (l.originLotId || l.id) === source.id : ["PROD", "PACK"].includes(l.warehouse))).sort((a, b) => (a.warehouse === "PROD" ? 0 : 1) - (b.warehouse === "PROD" ? 0 : 1) || String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")) || String(a.at).localeCompare(String(b.at)) || a.id.localeCompare(b.id));
 		for (const lot of choices) {
 			let quantity = round$1(Math.min(left, available.get(lot.id) || 0));
 			if (lot.unit === "PC") quantity = Math.floor(quantity);
@@ -15656,6 +15680,11 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 		else {
 			const options = automaticFillingCandidates(inv.materials, job.bulkCode).filter((m) => Array.isArray(source.allowedFinishedCodes) && source.allowedFinishedCodes.includes(m.code));
 			let code = job.finishedCode;
+			const selected = parent.data.confirmations.find((c) => c.id === job.confirmationId)?.selectedFillingCode;
+			if (!job.qualitySelectionApplied && selected) {
+				code = selected;
+				job.qualitySelectionApplied = true;
+			}
 			if (!options.some((m) => m.code === code)) code = options.length === 1 ? options[0].code : "";
 			if (!code) setJob(job, "choose_product");
 			else if (state.issues.some((i) => i.orderId === child.id) || state.preparations.some((p) => p.orderId === child.id && p.quantity > p.cancelled) || (child.data.confirmations || []).length > 0 || (child.data.requirementChanges || []).length || child.data.requirements.some((r) => r.source !== "BOM")) setJob(job, "manual_review");
@@ -15728,7 +15757,7 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 								left = round$1(left - take);
 								if (!left) break;
 							}
-							if (lot.warehouse !== "PROD") {
+							if (lot.category === "semi" && lot.warehouse !== "PROD") {
 								const id = "AFTR-" + crypto.randomUUID(), number = serial("TR", state.transfers), material = {
 									code: lot.code,
 									name: lot.name,
@@ -15780,7 +15809,7 @@ async function runAutomaticFilling(db, demo, key, trigger) {
 								name: lot.name,
 								category: lot.category,
 								unit: lot.unit,
-								warehouse: "PROD",
+								warehouse: lot.warehouse,
 								batch: lot.batch,
 								quantity: line.quantity,
 								at: now,
@@ -15900,7 +15929,7 @@ async function automaticFillingOperation(db, u, b) {
 		if (job.status !== "manual_review") throw Error("التحويل اليدوي متاح للأوامر التي تتطلب مراجعة يدوية فقط");
 		assertApprover(u, job.by, demo);
 		const source = inv.lots.find((l) => l.id === job.sourceLotId);
-		if (!source || source.quality !== "A" || source.warehousePending) throw Error("استكمل جودة واستلام البلك أولًا");
+		if (!source || source.quality !== "A" || source.warehousePending) throw Error("استكمل اعتماد جودة البلك أولًا");
 		if (!child.data.code || !source.allowedFinishedCodes?.includes(child.data.code)) throw Error("اختر منتجًا اعتمدته جودة البلك");
 		const now = (/* @__PURE__ */ new Date()).toISOString(), reason = required(b.reason, "سبب التحويل للتنفيذ اليدوي"), parent = inv.orders.find((o) => o.id === job.parentOrderId);
 		assertDayOpen(inv, operatingShift(now).day);
@@ -17039,6 +17068,7 @@ async function warehouseCycle(db, u, b) {
 	};
 	if (op === "cycle_receive") {
 		const l = lot();
+		if (l.directBulk) throw Error("البلك ينتقل مباشرة للتعبئة بعد الجودة ولا يحتاج استلام مخازن");
 		if (l.directFruit) throw Error("الثمار تستلم مباشرة بحوض الإنتاج وتسجل بالأرصدة دون اعتماد المخزن");
 		if (!l.warehousePending) throw Error("تم استلام الباتش بالمخزن بالفعل");
 		if (l.quality !== "A") throw Error("يجب اعتماد الجودة بالقبول قبل تأكيد استلام المخزن");
