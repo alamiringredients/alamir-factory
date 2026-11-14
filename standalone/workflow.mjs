@@ -332,6 +332,20 @@ function tagNewMovements(state, now) {
 	visit(state);
 }
 //#endregion
+//#region lib/bulk-receipt-policy.ts
+function bulkReceiptPolicy(state, order, confirmation) {
+	const c = confirmation, bulk = order.data.type === "Bulk" && c.kind === "main", lotId = "P-" + order.id + "-" + c.id;
+	const received = (state.warehouseReceipts || []).some((r) => r.lotId === lotId);
+	const moved = (state.issues || []).some((r) => r.lotId === lotId) || (state.transfers || []).some((r) => r.sourceLotId === lotId && !r.cancelledAt);
+	const directBulk = bulk && c.directBulk === true && !received && moved;
+	const restored = bulk && c.directBulk === true && !received && !moved;
+	return {
+		directBulk,
+		requiresWarehouseReceipt: !directBulk && (c.requiresWarehouseReceipt === true || restored),
+		warehouse: directBulk ? "PROD" : restored ? "SEMI" : c.warehouse || order.data.warehouse || (order.data.type === "Filling" ? "FG" : "SEMI")
+	};
+}
+//#endregion
 //#region lib/fruit-receiving.ts
 function fruitReceiptLocation(state, id) {
 	const lotId = "T-" + id;
@@ -12533,13 +12547,15 @@ var masterData = {
 	...production_master_default,
 	conflicts: production_master_default.conflicts
 };
-function bomPlan(code, target, materials) {
-	const recipe = production_master_default.boms.find((r) => r.code === code);
+function bomPlan(code, target, materials, dataset = masterData) {
+	const recipe = dataset.boms.find((r) => r.code === code);
 	if (!recipe) return null;
 	if (!Number.isFinite(target) || target <= 0) throw Error("أدخل كمية مستهدفة موجبة لحساب مخطط الصرف");
 	const inputs = [], outputs = [], warnings = [];
 	const visit = (r, amount, path) => {
 		if (path.includes(r.code)) throw Error("حلقة في وصفة التصنيع");
+		if (r.blockedReasons?.length) throw Error("راجع وصفة " + r.code + ": " + r.blockedReasons.join("؛ "));
+		if (!Number.isFinite(r.base) || r.base <= 0) throw Error("الكمية الأساسية غير صالحة");
 		for (const l of r.lines) {
 			const m = materials.find((m) => m.code === l.code);
 			let quantity = l.quantity * amount / r.base;
@@ -12559,6 +12575,12 @@ function bomPlan(code, target, materials) {
 			}
 			if (l.unit === "G" && m.unit === "KG") quantity /= 1e3;
 			else if (l.unit !== m.unit) throw Error("وحدة مخطط الصرف لا تطابق وحدة الصنف " + l.code);
+			if (m.phantom) {
+				const child = dataset.boms.find((b) => b.code === m.code);
+				if (output || !child) throw Error("راجع مجموعة التعبئة " + m.code);
+				visit(child, quantity, [...path, r.code]);
+				continue;
+			}
 			const list = output ? outputs : inputs, existing = list.find((x) => x.code === l.code);
 			if (existing) existing.quantity += quantity;
 			else list.push({
@@ -12580,15 +12602,15 @@ function bomPlan(code, target, materials) {
 		if (!l.blocked) l.bomQuantity = l.quantity;
 	}
 	return {
-		source: production_master_default.source,
-		revision: production_master_default.revision,
+		source: dataset.source,
+		revision: dataset.revision,
 		code,
 		base: recipe.base,
 		unit: recipe.unit,
 		target,
 		inputs,
 		outputs,
-		warnings: [...new Set(warnings)]
+		warnings
 	};
 }
 //#endregion
@@ -13250,21 +13272,22 @@ async function orderLifecycle(db, u, b) {
 }
 //#endregion
 //#region lib/packing-plan.ts
-function packingPlan(code, target, materials, policy = "partial") {
-	const plan = bomPlan(code, target, materials);
+function packingPlan(code, target, materials, policy = "partial", dataset = masterData) {
+	const plan = bomPlan(code, target, materials, dataset);
 	if (!plan) return null;
+	const recipe = dataset.boms.find((b) => b.code === code);
 	const drum = plan.inputs.find((r) => ["200000", "200010"].includes(r.code));
-	if (!drum) return plan;
-	const recipe = masterData.boms.find((b) => b.code === code);
-	const sourceDrum = recipe.lines.filter((l) => l.code === drum.code && l.quantity > 0).reduce((n, l) => n + l.quantity, 0);
-	const nominal = recipe.base / sourceDrum, count = Math.ceil(target / nominal - 1e-9), whole = Math.floor(target / nominal + 1e-9), partial = Math.round((target - whole * nominal) * 1e3) / 1e3;
+	const legacyCount = dataset.revision === masterData.revision && drum ? recipe.lines.filter((l) => l.code === drum.code && l.quantity > 0).reduce((n, l) => n + l.quantity, 0) : 0;
+	const nominal = recipe.nominalWeight || (legacyCount ? recipe.base / legacyCount : 0);
+	if (!nominal) return plan;
+	if (!["full", "partial"].includes(policy)) throw Error("اختر سياسة العبوات");
+	const count = Math.ceil(target / nominal - 1e-9), whole = Math.floor(target / nominal + 1e-9), partial = Math.round((target - whole * nominal) * 1e3) / 1e3;
 	if (policy === "full" && partial > 0) throw Error("العبوات الكاملة تتطلب كمية من مضاعفات الوزن الاسمي");
-	const factor = count / drum.quantity;
+	const rounded = bomPlan(code, count * nominal, materials, dataset);
 	for (const r of plan.inputs) {
 		r.theoreticalQuantity = r.quantity;
 		if (materials.find((m) => m.code === r.code)?.category === "packaging") {
-			const source = recipe.lines.filter((l) => l.code === r.code && l.quantity > 0 && !l.coproduct).reduce((n, l) => n + l.quantity, 0);
-			const n = source ? source * count / sourceDrum : r.quantity * factor;
+			const n = rounded.inputs.find((x) => x.code === r.code).quantity;
 			r.quantity = r.unit === "PC" ? Math.ceil(n - 1e-9) : Math.round(n * 1e3) / 1e3;
 			r.bomQuantity = r.quantity;
 		}
@@ -13273,7 +13296,7 @@ function packingPlan(code, target, materials, policy = "partial") {
 		...plan,
 		packing: {
 			policy,
-			nominalWeight: Math.round(nominal * 1e3) / 1e3,
+			nominalWeight: nominal,
 			count,
 			whole,
 			partial
@@ -13858,7 +13881,7 @@ async function productionOperation(db, u, b) {
 			unit: d.unit || "KG"
 		} : inv.materials.find((m) => m.code === b.code && m.category === "byproduct");
 		if (!m || masterData.conflicts.some((x) => x.code === m.code)) throw Error("اختر مادة ناتج جانبي غير متعارضة من الدليل");
-		const directBulk = d.type === "Bulk" && b.kind === "main", warehouse = directBulk ? "PROD" : b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
+		const directBulk = false, warehouse = b.warehouse || d.warehouse || (d.type === "Filling" ? "FG" : "SEMI");
 		if (!inv.warehouses.some((w) => w.code === warehouse)) throw Error("اختر مخزن الناتج");
 		if (b.batch && inv.lots.some((l) => l.code === m.code && l.batch === b.batch)) throw Error("الباتش مستخدم لهذا المنتج");
 		const amount = qty(b.quantity);
@@ -13907,14 +13930,14 @@ async function productionOperation(db, u, b) {
 			warehouse,
 			quantity: qty(b.quantity),
 			directBulk,
-			requiresWarehouseReceipt: !directBulk,
+			requiresWarehouseReceipt: true,
 			batch: b.batch ? required(b.batch, "الباتش") : d.type === "Filling" && b.kind === "main" ? nextOutputBatch(inv, order) : order.batch + "-CF-" + (d.confirmations.length + 1),
 			stock: b.kind === "main" ? "Quality Stock" : "Unrestricted Stock",
 			at: now,
 			by: u.email,
 			decision: null
 		});
-		action = directBulk ? "تسجيل بلك للتعبئة المباشرة" : "تسجيل ناتج إلى المخزن";
+		action = "تسجيل ناتج إلى المخزن";
 	}
 	if (op === "production_weigh") {
 		const c = d.confirmations.find((c) => c.id === b.confirmationId && c.kind === "main");
@@ -14445,13 +14468,13 @@ async function inventorySnapshot(db, demo) {
 		});
 	}
 	for (const o of os) for (const c of o.data.confirmations || []) {
-		const directBulk = o.data.type === "Bulk" && c.kind === "main" && (c.directBulk === true || c.requiresWarehouseReceipt === true) && !state.warehouseReceipts.some((r) => r.lotId === "P-" + o.id + "-" + c.id), category = c.kind === "main" ? o.data.type === "Filling" ? "finished" : "semi" : "byproduct";
+		const receiptPolicy = bulkReceiptPolicy(state, o, c), directBulk = receiptPolicy.directBulk, category = c.kind === "main" ? o.data.type === "Filling" ? "finished" : "semi" : "byproduct";
 		add({
 			code: c.code,
 			name: c.name,
 			category,
 			unit: c.unit || o.data.unit || "KG",
-			warehouse: directBulk ? "PROD" : c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI")
+			warehouse: receiptPolicy.warehouse
 		});
 		lots.push({
 			id: "P-" + o.id + "-" + c.id,
@@ -14459,11 +14482,11 @@ async function inventorySnapshot(db, demo) {
 			name: c.name,
 			category,
 			unit: c.unit || o.data.unit || "KG",
-			warehouse: directBulk ? "PROD" : c.warehouse || o.data.warehouse || (category === "finished" ? "FG" : "SEMI"),
+			warehouse: receiptPolicy.warehouse,
 			batch: c.batch,
 			quantity: c.quantity,
 			directBulk,
-			requiresWarehouseReceipt: !directBulk && c.requiresWarehouseReceipt === true,
+			requiresWarehouseReceipt: receiptPolicy.requiresWarehouseReceipt,
 			legacy: 0,
 			quality: c.kind === "byproduct" && (o.data.cycleVersion || 0) < 3 ? "A" : c.decision || "H",
 			color: c.color || c.colorDescription || "",
